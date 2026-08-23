@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@import "tailwindcss";
+
+/* ══════════════════════════════════════════════
+   KAFE+ GLOBAL DESIGN TOKENS
+   Single source of truth for all colors/surfaces
+   Warm POS palette – never hard-code elsewhere
+══════════════════════════════════════════════ */
+:root {
+  --app:          #dde6ed;   /* page background */
+  --panel:        #cdd8e0;   /* sidebar, section panels */
+  --card:         #ffffff;   /* cards, inputs, modals */
+  --card-hover:   #f4f7f9;
+  --header:       #b8c9d4;   /* top bar */
+  --border:       rgba(0,0,0,0.10);
+  --border-sub:   rgba(0,0,0,0.06);
+  --text:         #1e293b;
+  --text-2:       #475569;
+  --text-muted:   #7a8fa0;
+  --brand:        #f97316;   /* orange accent */
+  --sky:          #38bdf8;   /* table occupied / active */
+  --sky-d:        #0284c7;
+  --success:      #16a34a;
+  --danger:       #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--app);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Tailwind utility aliases so existing class names keep working ── */
+.bg-app          { background-color: var(--app)    !important; }
+.bg-panel        { background-color: var(--panel)  !important; }
+.bg-panel-subtle { background-color: #d5e0e8       !important; }
+.bg-card         { background-color: var(--card)   !important; }
+.bg-card-hover   { background-color: var(--card-hover) !important; }
+.bg-input        { background-color: var(--card)   !important; }
+
+.text-main       { color: var(--text)       !important; }
+.text-secondary  { color: var(--text-2)     !important; }
+.text-muted      { color: var(--text-muted) !important; }
+
+.border-theme        { border-color: var(--border)     !important; }
+.border-theme-subtle { border-color: var(--border-sub) !important; }
+.shadow-theme        { box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important; }
+
+/* Sidebar */
+.sidebar-bg  { background-color: #c4d4dc; }
+.header-bg   { background-color: var(--header); }
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: #a0b8c4; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #7a9fb0; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+
+/* ── Animations ── */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; } to { opacity: 1; }
+}
+.animate-slide-up { animation: slide-up 0.18s ease-out; }
+.animate-fade-in  { animation: fade-in 0.15s ease-out; }
