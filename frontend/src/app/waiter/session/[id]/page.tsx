@@ -410,7 +410,7 @@ export default function TableSessionDeskPage() {
 
           <div className="flex-1 overflow-hidden bg-[#c4d4dc] rounded-3xl p-3 flex flex-col border border-slate-300/60 shadow-inner">
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              {categories.map((cat) => {
+              {categories.map((cat: any) => {
                 const isSelected = selectedCategory === cat.id;
                 const catIcon = cat.icon || '☕';
                 return (
