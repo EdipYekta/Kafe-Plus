@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -32,7 +32,7 @@ const RECURRENCE_LABELS: Record<string, string> = {
   one_time: 'Tek Seferlik',
 };
 
-export default function UnifiedCashierAndFinancePage() {
+function CashierContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
@@ -1242,5 +1242,13 @@ function StructureModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
         </form>
       </div>
     </div>
+  );
+}
+
+export default function UnifiedCashierAndFinancePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-muted">Yükleniyor...</div>}>
+      <CashierContent />
+    </Suspense>
   );
 }
