@@ -1,38 +1,43 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import {
-  Coffee, LayoutGrid, CreditCard, ChefHat,
-  BarChart3, Package, Users, Settings, LogOut,
-  Menu, X, MapPin, Receipt
+  Coffee, CreditCard, ChefHat, LayoutGrid, Settings, LogOut,
+  Menu, X, MoreHorizontal,
 } from 'lucide-react';
 import clsx from 'clsx';
 
-const ALL_NAV_ITEMS = [
-  { icon: MapPin,     label: 'Masa Haritası',          href: '/waiter',   roles: null },
-  { icon: CreditCard, label: 'Kasa, Ciro & Masraflar', href: '/cashier',  roles: ['Admin','Manager','Cashier'] },
-  { icon: ChefHat,    label: 'Mutfak Ekranı (KDS)',    href: '/kitchen',  roles: ['Admin','Manager','Cashier','Kitchen'] },
-  { icon: Package,    label: 'Ürünler & Menü',         href: '/products', roles: ['Admin','Manager'] },
-  { icon: Users,      label: 'Personel & Garsonlar',   href: '/staff',    roles: ['Admin','Manager'] },
-  { icon: Settings,   label: 'Sistem Ayarları',        href: '/settings', roles: ['Admin','Manager'] },
-  { icon: LayoutGrid, label: 'Genel Dashboard',        href: '/dashboard',roles: ['Admin','Manager','Cashier'] },
-];
+function useNavItems() {
+  const { user } = useAuthStore();
+  if (!user) return [];
+
+  const p = user.permissions || {};
+  const role = user.role;
+  const isAdmin = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+
+  return [
+    { icon: Coffee, label: 'Masalar', href: '/waiter', show: true },
+    { icon: CreditCard, label: 'Kasa', href: '/cashier', show: p.can_take_payment || p.can_view_revenue || isAdmin },
+    { icon: ChefHat, label: 'Mutfak', href: '/kitchen', show: p.can_view_kitchen || isAdmin },
+    { icon: LayoutGrid, label: 'Panel', href: '/dashboard', show: p.can_view_revenue || isAdmin },
+    { icon: Settings, label: 'Yönetim', href: '/manage', show: isAdmin },
+  ].filter(item => item.show);
+}
 
 function LiveClock() {
   const [time, setTime] = useState('');
   useEffect(() => {
-    const tick = () => setTime(new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const tick = () => setTime(new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-white/70 border border-black/10 text-xs font-mono font-bold text-slate-700 shadow-xs">
-      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+    <span className="text-xs font-mono font-medium" style={{ color: 'var(--text-2)' }}>
       {time}
-    </div>
+    </span>
   );
 }
 
@@ -40,178 +45,327 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuthStore();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('sidebar-collapsed') === 'true';
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
+
+  const navItems = useNavItems();
 
   if (!user) return null;
 
   const handleLogout = () => { logout(); router.push('/login'); };
 
-  // Filter nav based on role
-  const navItems = ALL_NAV_ITEMS.filter(item =>
-    item.roles === null || item.roles.includes(user.role)
-  );
-
   const initials = user.full_name
     ?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'K+';
 
-  /* ── consistent tokens (same values as waiter/cashier standalone pages) ── */
-  const APP  = '#dde6ed';   // page body
-  const SIDE = '#c4d4dc';   // sidebar
-  const HDR  = '#b8c9d4';   // top header
-  const CARD = '#ffffff';
-  const BORD = 'rgba(0,0,0,0.10)';
+  const bottomNavItems = navItems.slice(0, 4);
+  const sidebarWidth = collapsed ? '72px' : '220px';
+
+  const NavLink = ({ item, onClick, mode }: { item: typeof navItems[0]; onClick?: () => void; mode: 'sidebar' | 'mobile-drawer' | 'bottom' }) => {
+    const active = pathname === item.href
+      || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
+      || (item.href === '/manage' && ['/products', '/staff', '/settings', '/expenses', '/reports'].includes(pathname));
+    const Icon = item.icon;
+
+    if (mode === 'bottom') {
+      return (
+        <Link
+          href={item.href}
+          onClick={onClick}
+          className={clsx(
+            'flex flex-col items-center justify-center gap-0.5 flex-1 py-2 transition-colors relative',
+            active ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          )}
+        >
+          {active && (
+            <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-orange-500" />
+          )}
+          <Icon className="w-5 h-5" />
+          <span className="text-[10px] font-semibold leading-none">{item.label}</span>
+        </Link>
+      );
+    }
+
+    if (mode === 'mobile-drawer') {
+      return (
+        <Link
+          href={item.href}
+          onClick={onClick}
+          className={clsx(
+            'flex items-center gap-4 px-5 py-3.5 text-sm font-medium transition-all',
+            active
+              ? 'text-white bg-white/10 border-l-2 border-orange-500'
+              : 'text-slate-300 hover:text-white hover:bg-white/5 border-l-2 border-transparent'
+          )}
+        >
+          <Icon className="w-5 h-5 flex-shrink-0" style={{ color: active ? 'var(--brand)' : undefined }} />
+          <span>{item.label}</span>
+        </Link>
+      );
+    }
+
+    // sidebar mode — title attribute only (no absolute tooltip to avoid horizontal scroll)
+    return (
+      <Link
+        href={item.href}
+        title={collapsed ? item.label : undefined}
+        className={clsx(
+          'flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-150 group relative',
+          collapsed ? 'justify-center px-0 py-3 mx-0' : 'px-3 py-2.5',
+          active ? 'bg-white/10 font-semibold' : 'hover:bg-white/10'
+        )}
+        style={{ color: active ? 'var(--text)' : 'var(--text-2)' }}
+      >
+        {active && (
+          <span
+            className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full"
+            style={{ background: 'var(--brand)' }}
+          />
+        )}
+        <Icon className="w-5 h-5 flex-shrink-0" style={{ color: active ? 'var(--text)' : 'var(--text-2)' }} />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+      </Link>
+    );
+  };
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans select-none relative" style={{ background: APP, color: '#1e293b' }}>
-      {/* Backdrop */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 backdrop-blur-[2px]"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ─── Sidebar Drawer ─── */}
+    <div
+      className="flex h-[100dvh] overflow-hidden select-none"
+      style={{ background: 'var(--app)', color: 'var(--text)' }}
+    >
+      {/* ─── Desktop Sidebar (hidden on mobile) ─── */}
       <aside
-        style={{ background: SIDE, borderRight: `1px solid ${BORD}` }}
-        className={clsx(
-          'fixed inset-y-0 left-0 z-50 w-72 flex flex-col transition-transform duration-250 ease-out shadow-2xl',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
+        style={{
+          width: sidebarWidth,
+          minWidth: sidebarWidth,
+          background: 'var(--app)',
+          borderRight: '1px solid var(--border)',
+          transition: 'width 0.2s cubic-bezier(0.4,0,0.2,1), min-width 0.2s cubic-bezier(0.4,0,0.2,1)',
+        }}
+        className="hidden md:flex flex-col h-full flex-shrink-0 z-40 overflow-hidden"
       >
         {/* Brand */}
-        <div className="p-4 flex items-center justify-between" style={{ borderBottom: `1px solid ${BORD}`, background: CARD + 'aa' }}>
-          <Link href="/waiter" onClick={() => setSidebarOpen(false)} className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 flex items-center justify-center shadow-sm text-white">
-              <Coffee className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-0.5">
-                Kafe<span className="text-orange-600">+</span>
-              </h1>
-              <p className="text-[10px] text-slate-500 font-bold truncate max-w-[150px]">
-                {user.cafe_name || 'Restoran Sistemi'}
-              </p>
-            </div>
-          </Link>
+        <div className="flex items-center gap-3 px-2 flex-shrink-0" style={{ height: '56px' }}>
           <button
-            onClick={() => setSidebarOpen(false)}
-            style={{ background: CARD, border: `1px solid ${BORD}` }}
-            className="p-2 text-slate-500 hover:text-slate-900 rounded-xl shadow-xs transition-all active:scale-95"
+            onClick={toggleCollapsed}
+            className="w-10 h-10 flex items-center justify-center rounded-xl transition-all hover:bg-white/10 active:scale-95 flex-shrink-0"
+            title={collapsed ? 'Genişlet' : 'Daralt'}
           >
-            <X className="w-5 h-5" />
+            <Menu className="w-5 h-5" style={{ color: 'var(--text)' }} />
           </button>
-        </div>
-
-        {/* Quick jump */}
-        <div className="p-3">
-          <Link
-            href="/waiter"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-[#38bdf8] hover:bg-[#0284c7] text-white font-black text-xs shadow-xs transition-all active:scale-98"
-          >
-            <MapPin className="w-4 h-4" />
-            <span>Masa Haritasına Git</span>
-          </Link>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-1 space-y-1 overflow-y-auto custom-scrollbar">
-          <div className="px-3 py-1 text-[10px] font-black tracking-wider text-slate-500 uppercase">Sayfalar</div>
-          {navItems.map(({ icon: Icon, label, href }) => {
-            const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href + '/'));
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setSidebarOpen(false)}
-                style={active ? { background: CARD, border: `1px solid ${BORD}` } : {}}
-                className={clsx(
-                  'flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all duration-150',
-                  active
-                    ? 'text-slate-900 shadow-xs ring-1 ring-orange-400/30 font-black'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
-                )}
+          {!collapsed && (
+            <Link href="/waiter" className="flex items-center gap-2 overflow-hidden">
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center shadow-sm text-white flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, var(--brand), #ff9500)' }}
               >
-                <Icon className={clsx('w-4 h-4', active ? 'text-orange-500' : 'text-slate-400')} />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
+                <Coffee className="w-4 h-4" />
+              </div>
+              <span className="text-base font-black tracking-tight whitespace-nowrap" style={{ color: 'var(--text)' }}>
+                Kafe<span style={{ color: 'var(--brand)' }}>+</span>
+              </span>
+            </Link>
+          )}
+        </div>
+
+        {/* Nav — overflow-x clipped so no horizontal scroll; overflow-y auto for vertical */}
+        <nav
+          className="flex-1 px-2 py-2 space-y-0.5"
+          style={{ overflowY: 'auto', overflowX: 'hidden' }}
+        >
+          {!collapsed && (
+            <p className="text-[10px] font-semibold uppercase tracking-widest px-3 py-2" style={{ color: 'var(--text-muted)' }}>
+              {user.cafe_name || 'Kafe Sistemi'}
+            </p>
+          )}
+          {navItems.map(item => (
+            <NavLink key={item.href} item={item} mode="sidebar" />
+          ))}
         </nav>
 
-        {/* Footer */}
-        <div className="p-3 space-y-2" style={{ borderTop: `1px solid ${BORD}`, background: CARD + '99' }}>
-          <div className="flex items-center gap-2.5 p-2.5 rounded-2xl shadow-xs" style={{ background: CARD, border: `1px solid ${BORD}` }}>
+        {/* User footer */}
+        <div className="p-2 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className={clsx('flex items-center rounded-xl transition-all', collapsed ? 'justify-center p-2' : 'gap-2.5 p-2 hover:bg-white/5 cursor-default')}>
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-black"
-              style={{ background: user.avatar_color || '#f97316' }}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0"
+              style={{ background: user.avatar_color || 'var(--brand)' }}
             >
               {initials}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-slate-900 text-xs font-black truncate">{user.full_name}</p>
-              <p className="text-[10px] font-bold text-slate-500">{user.role}</p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-              title="Çıkış Yap"
-            >
+            {!collapsed && (
+              <>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{user.full_name}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{user.role}</p>
+                </div>
+                <button onClick={handleLogout} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors" title="Çıkış" style={{ color: 'var(--text-muted)' }}>
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
+          {collapsed && (
+            <button onClick={handleLogout} className="w-full flex justify-center p-2 rounded-xl hover:bg-white/10 mt-1" title="Çıkış" style={{ color: 'var(--text-muted)' }}>
               <LogOut className="w-4 h-4" />
             </button>
-          </div>
+          )}
         </div>
       </aside>
 
-      {/* ─── Main Area ─── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top Header */}
-        <header
-          style={{ background: HDR, borderBottom: `1px solid ${BORD}` }}
-          className="h-14 flex items-center px-4 lg:px-6 gap-3 flex-shrink-0 z-30 justify-between shadow-xs"
-        >
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              style={{ background: CARD, border: `1px solid ${BORD}` }}
-              className="flex items-center gap-2 text-slate-800 px-3.5 py-2 rounded-2xl text-xs font-bold shadow-xs transition-all active:scale-95"
-            >
-              <Menu className="w-4 h-4 text-orange-500" />
-              <span className="hidden sm:inline">Menü</span>
-            </button>
+      {/* ─── Mobile Drawer Overlay ─── */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+          <div
+            className="absolute left-0 top-0 bottom-0 w-72 flex flex-col z-10"
+            style={{ background: 'var(--app)', borderRight: '1px solid var(--border)' }}
+          >
+            <div className="flex items-center justify-between px-5 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg, var(--brand), #ff9500)' }}
+                >
+                  <Coffee className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-base font-black" style={{ color: 'var(--text)' }}>
+                    Kafe<span style={{ color: 'var(--brand)' }}>+</span>
+                  </p>
+                  <p className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    {user.cafe_name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors"
+                style={{ color: 'var(--text-2)' }}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-            <Link
-              href="/waiter"
-              style={{ background: CARD, border: `1px solid ${BORD}` }}
-              className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-2xl shadow-xs text-slate-800 transition-all active:scale-95 hover:bg-slate-50"
-            >
-              <MapPin className="w-3.5 h-3.5 text-sky-500" />
-              <span>Masalar</span>
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <LiveClock />
-            <div
-              className="flex items-center gap-2 px-3 py-1.5 rounded-2xl shadow-xs"
-              style={{ background: CARD, border: `1px solid ${BORD}` }}
-            >
+            <div className="px-5 py-3 flex items-center gap-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--card)' }}>
               <div
-                className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-black"
-                style={{ background: user.avatar_color || '#f97316' }}
+                className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black flex-shrink-0"
+                style={{ background: user.avatar_color || 'var(--brand)' }}
               >
                 {initials}
               </div>
-              <span className="text-xs font-bold text-slate-800 hidden md:block">{user.full_name}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>{user.full_name}</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{user.role}</p>
+              </div>
+              <LiveClock />
+            </div>
+
+            <nav className="flex-1 overflow-y-auto py-2">
+              {navItems.map(item => (
+                <NavLink key={item.href} item={item} mode="mobile-drawer" onClick={() => setMobileOpen(false)} />
+              ))}
+            </nav>
+
+            <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={() => { setMobileOpen(false); handleLogout(); }}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors"
+                style={{ color: 'var(--text-2)', background: 'var(--card)', border: '1px solid var(--border)' }}
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Çıkış Yap</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Main Content ─── */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top Header */}
+        <header
+          style={{
+            background: 'var(--header)',
+            borderBottom: '1px solid var(--border)',
+            height: '52px',
+          }}
+          className="flex items-center px-3 sm:px-5 gap-3 flex-shrink-0 z-30 justify-between"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10 transition-colors flex-shrink-0"
+              style={{ color: 'var(--text)' }}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <span className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+              {user.cafe_name || 'Kafe+'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:block"><LiveClock /></div>
+            <div
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl cursor-default"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-black flex-shrink-0"
+                style={{ background: user.avatar_color || 'var(--brand)' }}
+              >
+                {initials}
+              </div>
+              <span className="text-sm font-medium hidden sm:block" style={{ color: 'var(--text)' }}>{user.full_name}</span>
             </div>
           </div>
         </header>
 
-        {/* Page body */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-5" style={{ background: APP }}>
+        {/* Page Body */}
+        <main
+          className="flex-1 overflow-y-auto p-3 sm:p-5 pb-20 md:pb-5"
+          style={{ background: 'var(--app)' }}
+        >
           {children}
         </main>
+
+        {/* ─── Mobile Bottom Tab Bar ─── */}
+        <nav
+          className="md:hidden flex-shrink-0 flex items-stretch"
+          style={{
+            background: 'var(--app)',
+            borderTop: '1px solid var(--border)',
+            height: '64px',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+          }}
+        >
+          {bottomNavItems.map(item => (
+            <NavLink key={item.href} item={item} mode="bottom" />
+          ))}
+          {navItems.length > 4 && (
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <MoreHorizontal className="w-5 h-5" />
+              <span className="text-[10px] font-semibold leading-none">Daha Fazla</span>
+            </button>
+          )}
+        </nav>
       </div>
     </div>
   );

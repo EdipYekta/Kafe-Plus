@@ -4,6 +4,52 @@ const jwt = require('jsonwebtoken');
 const db = require('../db');
 const router = express.Router();
 
+// Default permissions by role
+const DEFAULT_PERMISSIONS = {
+  Owner: {
+    can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+    can_view_products: true, can_view_kitchen: true, can_view_staff: true,
+    can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+    can_edit_table_items: true,
+  },
+  Admin: {
+    can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+    can_view_products: true, can_view_kitchen: true, can_view_staff: true,
+    can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+    can_edit_table_items: true,
+  },
+  Manager: {
+    can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+    can_view_products: true, can_view_kitchen: true, can_view_staff: true,
+    can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+    can_edit_table_items: true,
+  },
+  Cashier: {
+    can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+    can_view_products: false, can_view_kitchen: false, can_view_staff: false,
+    can_manage_expenses: false, can_print_z_report: true, can_view_weekly_monthly: false,
+    can_edit_table_items: false,
+  },
+  Waiter: {
+    can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only',
+    can_view_products: false, can_view_kitchen: false, can_view_staff: false,
+    can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false,
+    can_edit_table_items: false,
+  },
+  Kitchen: {
+    can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only',
+    can_view_products: false, can_view_kitchen: true, can_view_staff: false,
+    can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false,
+    can_edit_table_items: false,
+  },
+};
+
+function resolvePermissions(roleName, userPerms) {
+  const defaults = DEFAULT_PERMISSIONS[roleName] || DEFAULT_PERMISSIONS.Waiter;
+  if (!userPerms || Object.keys(userPerms).length === 0) return defaults;
+  return { ...defaults, ...userPerms };
+}
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
@@ -32,6 +78,8 @@ router.post('/login', async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
+    const permissions = resolvePermissions(user.role_name, user.permissions || {});
+
     res.json({
       token,
       user: {
@@ -42,7 +90,8 @@ router.post('/login', async (req, res) => {
         cafe_id: user.cafe_id,
         cafe_name: user.cafe_name || 'Kafe+',
         logo_url: user.logo_url,
-        avatar_color: user.avatar_color || '#f97316'
+        avatar_color: user.avatar_color || '#f97316',
+        permissions,
       }
     });
   } catch (err) {
@@ -75,7 +124,6 @@ router.post('/pin-login', async (req, res) => {
     }
 
     const { rows } = await db.query(query, params);
-
     if (!rows[0]) return res.status(401).json({ error: 'Geçersiz veya bulunamayan PIN kodu' });
     const user = rows[0];
 
@@ -87,6 +135,8 @@ router.post('/pin-login', async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
+    const permissions = resolvePermissions(user.role_name, user.permissions || {});
+
     res.json({
       token,
       user: {
@@ -97,7 +147,8 @@ router.post('/pin-login', async (req, res) => {
         cafe_id: user.cafe_id,
         cafe_name: user.cafe_name || 'Kafe+',
         logo_url: user.logo_url,
-        avatar_color: user.avatar_color || '#f97316'
+        avatar_color: user.avatar_color || '#f97316',
+        permissions,
       }
     });
   } catch (err) {
@@ -105,7 +156,7 @@ router.post('/pin-login', async (req, res) => {
   }
 });
 
-// POST /api/auth/admin-login (Super Admin - hardcoded password)
+// POST /api/auth/admin-login (Super Admin)
 router.post('/admin-login', async (req, res) => {
   try {
     const { password } = req.body;
@@ -130,7 +181,12 @@ router.post('/admin-login', async (req, res) => {
         role: 'SuperAdmin',
         cafe_id: null,
         cafe_name: 'Kafe+ Yönetim',
-        avatar_color: '#ef4444'
+        avatar_color: '#ef4444',
+        permissions: {
+          can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+          can_view_products: true, can_view_kitchen: true, can_view_staff: true,
+          can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+        }
       }
     });
   } catch (err) {
@@ -140,9 +196,29 @@ router.post('/admin-login', async (req, res) => {
 
 // GET /api/auth/me
 const { authenticate } = require('../middleware/auth');
-router.get('/me', authenticate, (req, res) => {
-  const { password_hash, ...user } = req.user;
-  res.json(user);
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    if (req.user.id === 0) {
+      return res.json({
+        ...req.user,
+        permissions: {
+          can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+          can_view_products: true, can_view_kitchen: true, can_view_staff: true,
+          can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+        }
+      });
+    }
+    const { rows } = await db.query(
+      'SELECT u.*, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1',
+      [req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    const { password_hash, ...user } = rows[0];
+    const permissions = resolvePermissions(user.role_name, user.permissions || {});
+    res.json({ ...user, permissions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

@@ -12,7 +12,7 @@ router.get('/', authenticate, async (req, res) => {
         t.name as table_name, a.name as area_name,
         json_agg(json_build_object(
           'id', oi.id, 'product_id', oi.product_id, 'product_name', p.name,
-          'quantity', oi.quantity, 'unit_price', oi.unit_price,
+          'quantity', oi.quantity, 'paid_quantity', oi.paid_quantity, 'unit_price', oi.unit_price,
           'note', oi.note, 'status', oi.status
         ) ORDER BY oi.id) as items
       FROM orders o
@@ -126,6 +126,96 @@ router.get('/kitchen', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper permission check for table item modifications
+function canEditTableItems(user) {
+  if (['SuperAdmin', 'Admin', 'Manager', 'Owner'].includes(user.role_name)) return true;
+  return !!user.permissions?.can_edit_table_items;
+}
+
+// PATCH /api/orders/items/:itemId - Update quantity of an order item
+router.patch('/items/:itemId', authenticate, async (req, res) => {
+  try {
+    if (!canEditTableItems(req.user)) {
+      return res.status(403).json({ error: 'Masadaki ürünleri düzenleme yetkiniz yok' });
+    }
+
+    const qty = parseInt(req.body.quantity);
+    if (!qty || qty < 1 || qty > 99) {
+      return res.status(400).json({ error: 'Geçersiz adet (1-99 arası olmalı)' });
+    }
+    const { rows: [item] } = await db.query(`
+      UPDATE order_items oi SET quantity=$1
+      FROM orders o
+      WHERE oi.id=$2 AND oi.order_id=o.id AND o.cafe_id=$3
+      RETURNING oi.*
+    `, [qty, req.params.itemId, req.user.cafe_id]);
+    if (!item) return res.status(404).json({ error: 'Sipariş kalemi bulunamadı' });
+
+    if (req.app.get('broadcast')) {
+      try {
+        req.app.get('broadcast')(req.user.cafe_id, 'order_item_updated', { item_id: item.id, quantity: item.quantity });
+      } catch (bcErr) {}
+    }
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/orders/items/:itemId - Delete an order item from active session
+router.delete('/items/:itemId', authenticate, async (req, res) => {
+  const client = await db.getClient();
+  try {
+    if (!canEditTableItems(req.user)) {
+      return res.status(403).json({ error: 'Masadaki ürünleri silme yetkiniz yok' });
+    }
+
+    await client.query('BEGIN');
+
+    // Find the item and its order
+    const { rows: [item] } = await client.query(`
+      SELECT oi.*, o.session_id, o.cafe_id
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE oi.id = $1 AND o.cafe_id = $2
+    `, [req.params.itemId, req.user.cafe_id]);
+
+    if (!item) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Sipariş kalemi bulunamadı' });
+    }
+
+    // Delete the order item
+    await client.query('DELETE FROM order_items WHERE id = $1', [item.id]);
+
+    // Check if order still has any items left
+    const { rows: remainingItems } = await client.query(
+      'SELECT id FROM order_items WHERE order_id = $1',
+      [item.order_id]
+    );
+
+    // If order has no more items, clean up the order
+    if (remainingItems.length === 0) {
+      await client.query('DELETE FROM orders WHERE id = $1', [item.order_id]);
+    }
+
+    await client.query('COMMIT');
+
+    if (req.app.get('broadcast')) {
+      try {
+        req.app.get('broadcast')(req.user.cafe_id, 'order_item_deleted', { item_id: item.id, session_id: item.session_id });
+      } catch (bcErr) {}
+    }
+
+    res.json({ success: true, message: 'Ürün masadan kaldırıldı' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

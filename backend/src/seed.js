@@ -1,39 +1,37 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 async function seed() {
-  console.log('🌱 Seeding database...');
+  console.log('Seeding database...');
 
   try {
-    // Create roles
+    // Roles already created by schema.sql. Ensure SuperAdmin exists.
     await db.query(`
       INSERT INTO roles (name, description) VALUES
-        ('Admin', 'Sistem yöneticisi'),
-        ('Manager', 'Kafe yöneticisi'),
-        ('Cashier', 'Kasa görevlisi'),
-        ('Waiter', 'Garson'),
-        ('Kitchen', 'Mutfak personeli')
+        ('SuperAdmin', 'Sistem / uygulama yöneticisi (tüm kafeler)')
       ON CONFLICT (name) DO NOTHING
     `);
-    console.log('✅ Roles created');
+    console.log('Roles ready');
 
-    // Create cafe
+    // Create demo cafe
     const { rows: [cafe] } = await db.query(`
-      INSERT INTO cafes (name, phone, address)
-      VALUES ('Kafe+ Demo', '0212 123 45 67', 'Bağcılar, İstanbul')
+      INSERT INTO cafes (name, phone, address, kitchen_enabled)
+      VALUES ('Kafe+ Demo', '0212 123 45 67', 'Bağcılar, İstanbul', true)
       ON CONFLICT DO NOTHING
       RETURNING *
     `);
     const cafeId = cafe?.id || 1;
-    console.log('✅ Cafe created:', cafeId);
+    console.log('Cafe created:', cafeId);
 
-    // Create users
-    const adminHash = await bcrypt.hash('admin123', 10);
+    // Create users — "admin" keeps username but is the cafe Owner
+    const ownerHash = await bcrypt.hash('admin123', 10);
     const staffHash = await bcrypt.hash('123456', 10);
 
     const users = [
-      { full_name: 'Admin Kullanıcı', username: 'admin', hash: adminHash, role: 'Admin', color: '#ef4444', pin: '1111' },
+      { full_name: 'Demo Sahibi', username: 'admin', hash: ownerHash, role: 'Owner', color: '#ef4444', pin: '1111' },
       { full_name: 'Ahmet Yönetici', username: 'manager', hash: staffHash, role: 'Manager', color: '#f97316', pin: '2222' },
       { full_name: 'Mehmet Kasiyer', username: 'kasiyer', hash: staffHash, role: 'Cashier', color: '#3b82f6', pin: '3333' },
       { full_name: 'Ayşe Garson', username: 'garson1', hash: staffHash, role: 'Waiter', color: '#22c55e', pin: '4444' },
@@ -49,7 +47,7 @@ async function seed() {
         ON CONFLICT (username) DO NOTHING
       `, [cafeId, role.id, u.full_name, u.username, u.hash, u.color, u.pin]);
     }
-    console.log('✅ Users created');
+    console.log('Users created');
 
     // Create areas
     const areaNames = ['İç Mekan', 'Bahçe', 'Teras', 'Balkon'];
@@ -65,113 +63,82 @@ async function seed() {
       const { rows } = await db.query('SELECT id FROM areas WHERE cafe_id=$1 ORDER BY sort_order', [cafeId]);
       areaIds.push(...rows.map(r => r.id));
     }
-    console.log('✅ Areas created:', areaIds);
+    console.log('Areas created:', areaIds);
 
     // Create tables
-    const tables = [];
     for (let aIdx = 0; aIdx < areaIds.length; aIdx++) {
       const prefix = ['A', 'B', 'T', 'K'][aIdx];
       const count = [12, 21, 8, 6][aIdx];
       for (let i = 1; i <= count; i++) {
         const col = (i - 1) % 7;
         const row = Math.floor((i - 1) / 7);
-        tables.push({
-          area_id: areaIds[aIdx],
-          name: `${prefix}${i}`,
-          capacity: [2, 4, 4, 6][Math.floor(Math.random() * 4)],
-          pos_x: col * 13 + 5,
-          pos_y: row * 20 + 10,
-          shape: i % 5 === 0 ? 'round' : 'square',
-        });
+        await db.query(`
+          INSERT INTO tables (cafe_id, area_id, name, capacity, pos_x, pos_y, shape)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT DO NOTHING
+        `, [cafeId, areaIds[aIdx], `${prefix}${i}`, [2, 4, 4, 6][Math.floor(Math.random() * 4)],
+            col * 13 + 5, row * 20 + 10, i % 5 === 0 ? 'round' : 'square']);
       }
     }
+    console.log('Tables created');
 
-    for (const t of tables) {
-      await db.query(`
-        INSERT INTO tables (cafe_id, area_id, name, capacity, pos_x, pos_y, shape)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT DO NOTHING
-      `, [cafeId, t.area_id, t.name, t.capacity, t.pos_x, t.pos_y, t.shape]);
+    // Load categories + products from items.json (same structure as the import endpoint)
+    const itemsPath = path.resolve(__dirname, '../../items.json');
+    let importData = [];
+    if (fs.existsSync(itemsPath)) {
+      importData = JSON.parse(fs.readFileSync(itemsPath, 'utf8'));
+    } else {
+      // Fallback small demo set
+      importData = [
+        { category: 'Espresso Kahveler', items: [
+          { name: 'Espresso', description: '30 ml tek shot yoğun kahve.', price: 110 },
+          { name: 'Latte', description: 'Espresso, sıcak süt ve süt köpüğü.', price: 150 },
+        ]},
+        { category: 'Soğuk İçecekler', items: [
+          { name: 'Limonata', description: '', price: 110 },
+          { name: 'Su', description: '', price: 40 },
+        ]},
+      ];
     }
-    console.log('✅ Tables created');
-
-    // Create categories
-    const cats = [
-      { name: 'Demleme Kahveler', icon: '☕', color: '#f97316' },
-      { name: 'Espresso Kahveler', icon: '☕', color: '#92400e' },
-      { name: 'Soğuk İçecekler', icon: '🧃', color: '#3b82f6' },
-      { name: 'Sıcak İçecekler', icon: '🫖', color: '#f59e0b' },
-      { name: 'Atıştırmalıklar', icon: '🥪', color: '#22c55e' },
-      { name: 'Tatlılar', icon: '🍰', color: '#ec4899' },
-      { name: 'Kahvaltılar', icon: '🍳', color: '#8b5cf6' },
-    ];
 
     const catIds = {};
-    for (let i = 0; i < cats.length; i++) {
+    for (let i = 0; i < importData.length; i++) {
+      const group = importData[i];
+      const catName = (group.category || '').trim();
+      if (!catName) continue;
       const { rows: [cat] } = await db.query(`
-        INSERT INTO categories (cafe_id, name, icon, color, sort_order)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO categories (cafe_id, name, icon, sort_order)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT DO NOTHING RETURNING id
-      `, [cafeId, cats[i].name, cats[i].icon, cats[i].color, i]);
-      if (cat) catIds[cats[i].name] = cat.id;
+      `, [cafeId, catName, '☕', i]);
+      if (cat) catIds[catName] = cat.id;
     }
-
-    // If conflict, fetch IDs
     const { rows: existingCats } = await db.query('SELECT id, name FROM categories WHERE cafe_id=$1', [cafeId]);
     for (const ec of existingCats) catIds[ec.name] = ec.id;
 
-    console.log('✅ Categories created');
-
-    // Create products
-    const products = [
-      // Demleme Kahveler
-      { cat: 'Demleme Kahveler', name: 'Filtre Kahve', price: 65, cost: 12 },
-      { cat: 'Demleme Kahveler', name: 'Pour Over', price: 90, cost: 18 },
-      { cat: 'Demleme Kahveler', name: 'French Press', price: 80, cost: 15 },
-      { cat: 'Demleme Kahveler', name: 'Chemex', price: 95, cost: 20 },
-      // Espresso
-      { cat: 'Espresso Kahveler', name: 'Espresso', price: 55, cost: 10 },
-      { cat: 'Espresso Kahveler', name: 'Americano', price: 65, cost: 11 },
-      { cat: 'Espresso Kahveler', name: 'Cappuccino', price: 90, cost: 18 },
-      { cat: 'Espresso Kahveler', name: 'Latte', price: 95, cost: 20 },
-      { cat: 'Espresso Kahveler', name: 'Flat White', price: 90, cost: 17 },
-      { cat: 'Espresso Kahveler', name: 'Türk Kahvesi', price: 50, cost: 8 },
-      // Soğuk
-      { cat: 'Soğuk İçecekler', name: 'Limonata', price: 75, cost: 15 },
-      { cat: 'Soğuk İçecekler', name: 'Ice Latte', price: 100, cost: 22 },
-      { cat: 'Soğuk İçecekler', name: 'Soda', price: 40, cost: 8 },
-      { cat: 'Soğuk İçecekler', name: 'Su', price: 20, cost: 4 },
-      { cat: 'Soğuk İçecekler', name: 'Ice Tea', price: 65, cost: 12 },
-      // Sıcak
-      { cat: 'Sıcak İçecekler', name: 'Çay', price: 35, cost: 5 },
-      { cat: 'Sıcak İçecekler', name: 'Bitki Çayı', price: 50, cost: 8 },
-      { cat: 'Sıcak İçecekler', name: 'Sıcak Çikolata', price: 80, cost: 18 },
-      { cat: 'Sıcak İçecekler', name: 'Salep', price: 75, cost: 14 },
-      // Atıştırmalık
-      { cat: 'Atıştırmalıklar', name: 'Tost', price: 85, cost: 25 },
-      { cat: 'Atıştırmalıklar', name: 'Patatesli Gözleme', price: 95, cost: 28 },
-      { cat: 'Atıştırmalıklar', name: 'Kruvasan', price: 70, cost: 20 },
-      { cat: 'Atıştırmalıklar', name: 'Kek', price: 60, cost: 15 },
-      // Tatlılar
-      { cat: 'Tatlılar', name: 'Cheesecake', price: 120, cost: 35 },
-      { cat: 'Tatlılar', name: 'Brownie', price: 100, cost: 28 },
-      { cat: 'Tatlılar', name: 'Tiramisu', price: 130, cost: 40 },
-      // Kahvaltı
-      { cat: 'Kahvaltılar', name: 'Serpme Kahvaltı', price: 250, cost: 80 },
-      { cat: 'Kahvaltılar', name: 'Menemen', price: 120, cost: 35 },
-      { cat: 'Kahvaltılar', name: 'Sahanda Yumurta', price: 90, cost: 25 },
-    ];
-
-    for (const p of products) {
-      const catId = catIds[p.cat];
+    let prodCount = 0;
+    for (const group of importData) {
+      const catId = catIds[(group.category || '').trim()];
       if (!catId) continue;
-      await db.query(`
-        INSERT INTO products (cafe_id, category_id, name, price, cost, preparation_time)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT DO NOTHING
-      `, [cafeId, catId, p.name, p.price, p.cost, Math.floor(Math.random() * 10) + 2]);
+      const items = Array.isArray(group.items) ? group.items : [];
+      for (const item of items) {
+        const name = (item.name || '').trim();
+        if (!name) continue;
+        await db.query(`
+          INSERT INTO products (cafe_id, category_id, name, description, price, preparation_time)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT DO NOTHING
+        `, [cafeId, catId, name, (item.description || '').trim() || null, parseFloat(item.price) || 0, Math.floor(Math.random() * 10) + 2]);
+        prodCount++;
+      }
     }
-    console.log('✅ Products created');
+    console.log(`Products created: ${prodCount}`);
+
+    // Mark a few popular items as quick access
+    const quickNames = ['Latte', 'Espresso', 'Türk Kahvesi', 'Çay', 'Su', 'Coca-Cola'];
+    for (const qn of quickNames) {
+      await db.query(`UPDATE products SET is_quick_access=true WHERE cafe_id=$1 AND name=$2`, [cafeId, qn]);
+    }
 
     // Expense structures
     const structures = [
@@ -180,7 +147,6 @@ async function seed() {
       { title: 'Elektrik Faturası', category: 'Fatura', recurrence_type: 'monthly', amount: 3000, due_day: 20 },
       { title: 'Doğalgaz Faturası', category: 'Fatura', recurrence_type: 'monthly', amount: 1500, due_day: 25 },
     ];
-
     for (const s of structures) {
       await db.query(`
         INSERT INTO expense_structures (cafe_id, title, category, recurrence_type, amount, due_day)
@@ -188,27 +154,27 @@ async function seed() {
         ON CONFLICT DO NOTHING
       `, [cafeId, s.title, s.category, s.recurrence_type, s.amount, s.due_day]);
     }
-    console.log('✅ Expense structures created');
+    console.log('Expense structures created');
 
-    // Create a cash register
     await db.query(`
       INSERT INTO cash_registers (cafe_id, name, day_end_time)
       VALUES ($1, 'Ana Kasa', '03:00')
       ON CONFLICT DO NOTHING
     `, [cafeId]);
-    console.log('✅ Cash register created');
+    console.log('Cash register created');
 
-    console.log('\n🎉 Seed completed successfully!');
-    console.log('\n📋 Demo Credentials:');
-    console.log('  Admin:   admin / admin123 (PIN: 1111)');
-    console.log('  Manager: manager / 123456 (PIN: 2222)');
-    console.log('  Cashier: kasiyer / 123456 (PIN: 3333)');
-    console.log('  Waiter:  garson1 / 123456 (PIN: 4444)');
-    console.log('  Kitchen: mutfak / 123456 (PIN: 6666)');
+    console.log('\nSeed completed successfully!');
+    console.log('\nDemo Credentials:');
+    console.log('  Owner:    admin / admin123 (PIN: 1111)');
+    console.log('  Manager:  manager / 123456 (PIN: 2222)');
+    console.log('  Cashier:  kasiyer / 123456 (PIN: 3333)');
+    console.log('  Waiter:   garson1 / 123456 (PIN: 4444)');
+    console.log('  Kitchen:  mutfak / 123456 (PIN: 6666)');
+    console.log('\nSuperAdmin login: /admin/login with password: Yekta1346!');
 
     process.exit(0);
   } catch (err) {
-    console.error('❌ Seed error:', err);
+    console.error('Seed error:', err);
     process.exit(1);
   }
 }

@@ -72,7 +72,8 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/waiter"
-              className="bg-[#38bdf8] hover:bg-[#0284c7] text-white font-bold px-4 py-2.5 rounded-2xl shadow-xs text-xs flex items-center gap-1.5 transition-all active:scale-95"
+              className="text-white font-bold px-4 py-2.5 rounded-2xl text-xs flex items-center gap-1.5 transition-all active:scale-95"
+              style={{ background: 'var(--sky-d)' }}
             >
               <MapPin className="w-4 h-4" />
               <span>Masa Haritası</span>
@@ -149,11 +150,11 @@ export default function DashboardPage() {
                       formatter={(val: any) => [`₺${Number(val).toFixed(2)}`, 'Ciro']}
                       labelFormatter={(h) => `Saat ${h}:00`}
                       contentStyle={{
-                        background: '#ffffff',
-                        border: '1px solid rgba(0,0,0,0.10)',
+                        background: 'var(--card)',
+                        border: '1px solid var(--border)',
                         borderRadius: '12px',
                         fontSize: '12px',
-                        color: '#1e293b',
+                        color: 'var(--text)',
                       }}
                     />
                     <Area

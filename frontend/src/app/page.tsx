@@ -21,12 +21,15 @@ export default function HomePage() {
   }, [isAuthenticated, user, router]);
 
   return (
-    <div className="min-h-screen bg-[#0f0f13] flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--app)' }}>
       <div className="text-center space-y-4">
-        <div className="w-16 h-16 rounded-2xl bg-brand flex items-center justify-center mx-auto pulse-ring">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto animate-pulse"
+          style={{ background: 'linear-gradient(135deg, var(--brand), #ff9500)' }}
+        >
           <Coffee className="w-8 h-8 text-white" />
         </div>
-        <p className="text-white/40 text-sm">Yükleniyor...</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Yukleniyor...</p>
       </div>
     </div>
   );

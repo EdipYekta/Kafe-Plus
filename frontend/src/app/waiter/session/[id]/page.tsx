@@ -1,15 +1,18 @@
 'use client';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import {
   X, Plus, Minus, Trash2, Send, CreditCard,
-  ChevronRight, ArrowRightLeft, MessageSquare, Coffee,
-  CheckCircle2, Clock, Check
+  ChevronRight, MessageSquare, Coffee,
+  CheckCircle2, ShoppingCart, ArrowLeft, Search,
+  Zap, Layers, Sparkles, ArrowRightLeft
 } from 'lucide-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '@/store/authStore';
+import MainLayout from '@/components/layout/MainLayout';
 
 interface CartItem {
   product_id: number;
@@ -19,68 +22,143 @@ interface CartItem {
   note: string;
 }
 
-export default function TableSessionDeskPage() {
+// ─── Pending Cart Item Row ───
+function CartItemRow({
+  item,
+  onUpdate,
+  onRemove,
+  onNote,
+}: {
+  item: CartItem;
+  onUpdate: (delta: number) => void;
+  onRemove: () => void;
+  onNote: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 py-2 border-b last:border-0" style={{ borderColor: 'var(--border-sub)' }}>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-bold truncate" style={{ color: 'var(--text)' }}>{item.name}</p>
+        {item.note && (
+          <p className="text-[10px] truncate" style={{ color: 'var(--brand)' }}>📝 {item.note}</p>
+        )}
+        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>₺{(item.price * item.quantity).toFixed(0)}</p>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <button
+          onClick={onNote}
+          className={clsx(
+            'w-6 h-6 rounded-lg flex items-center justify-center transition-colors',
+            item.note ? 'text-amber-400' : 'hover:opacity-80'
+          )}
+          style={{ background: item.note ? 'rgba(245,158,11,0.20)' : 'var(--card-hover)', color: item.note ? 'var(--brand)' : 'var(--text-muted)' }}
+          title="Not Ekle"
+        >
+          <MessageSquare className="w-3 h-3" />
+        </button>
+        <div className="flex items-center rounded-lg overflow-hidden" style={{ background: 'var(--card-hover)' }}>
+          <button
+            onClick={() => onUpdate(-1)}
+            className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all"
+            style={{ color: 'var(--text)' }}
+          >
+            <Minus className="w-2.5 h-2.5" />
+          </button>
+          <span className="w-5 text-center text-xs font-bold" style={{ color: 'var(--text)' }}>{item.quantity}</span>
+          <button
+            onClick={() => onUpdate(1)}
+            className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all"
+            style={{ color: 'var(--text)' }}
+          >
+            <Plus className="w-2.5 h-2.5" />
+          </button>
+        </div>
+        <button
+          onClick={onRemove}
+          className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors"
+          style={{ background: 'rgba(248,113,113,0.12)', color: 'var(--danger)' }}
+          title="Sepetten Sil"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function TableSessionPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params.id as string;
   const qc = useQueryClient();
+  const { user } = useAuthStore();
 
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
-  const [transferTarget, setTransferTarget] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<number | 'all' | 'quick'>('quick');
   const [noteFor, setNoteFor] = useState<number | null>(null);
   const [noteText, setNoteText] = useState('');
   const [kitchenNote, setKitchenNote] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [mobileTab, setMobileTab] = useState<'menu' | 'cart'>('menu');
+  const [showTransferModal, setShowTransferModal] = useState(false);
 
-  // 1. Fetch Cafe Info
+  const canPay = user?.permissions?.can_take_payment || user?.role === 'Owner' || user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin';
+  const canEditTableItems = user?.permissions?.can_edit_table_items || user?.role === 'Owner' || user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin';
+
   const { data: cafe } = useQuery({
     queryKey: ['cafe'],
-    queryFn: () => api.get('/cafes').then((r) => r.data),
+    queryFn: () => api.get('/cafes').then(r => r.data),
   });
-
-  // 2. Fetch Session Info
-  const { data: session, isLoading: sessionLoading } = useQuery({
+  const { data: session } = useQuery({
     queryKey: ['session', sessionId],
-    queryFn: () => api.get(`/sessions/${sessionId}`).then((r) => r.data),
-    refetchInterval: 10000,
+    queryFn: () => api.get(`/sessions/${sessionId}`).then(r => r.data),
+    refetchInterval: 12000,
   });
-
-  // 3. Fetch Existing Orders for this Table Session
   const { data: orders = [] } = useQuery({
     queryKey: ['orders', sessionId],
-    queryFn: () => api.get('/orders', { params: { session_id: sessionId } }).then((r) => r.data),
-    refetchInterval: 10000,
+    queryFn: () => api.get('/orders', { params: { session_id: sessionId } }).then(r => r.data),
+    refetchInterval: 12000,
   });
-
-  // 4. Fetch Categories
   const { data: categories = [] } = useQuery({
     queryKey: ['categories'],
-    queryFn: () => api.get('/categories').then((r) => r.data),
+    queryFn: () => api.get('/categories').then(r => r.data),
+  });
+  const { data: allProducts = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => api.get('/products').then(r => r.data),
+  });
+  const { data: tables = [] } = useQuery({
+    queryKey: ['tables'],
+    queryFn: () => api.get('/tables').then(r => r.data),
   });
 
-  // Set default category once loaded
-  useEffect(() => {
-    if (categories.length > 0 && selectedCategory === null) {
-      setSelectedCategory(categories[0].id);
+  const displayedProducts = useMemo(() => {
+    let list = allProducts;
+    if (selectedCategory === 'quick') {
+      list = allProducts.filter((p: any) => p.is_quick_access);
+      if (list.length === 0) list = allProducts.slice(0, 8);
+    } else if (selectedCategory !== 'all') {
+      list = allProducts.filter((p: any) => p.category_id === selectedCategory);
     }
-  }, [categories, selectedCategory]);
+    if (productSearch.trim()) {
+      const q = productSearch.toLowerCase();
+      list = list.filter((p: any) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.category_name || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [allProducts, selectedCategory, productSearch]);
 
-  // 5. Fetch Products for selected category
-  const { data: products = [] } = useQuery({
-    queryKey: ['products', selectedCategory],
-    queryFn: () => api.get('/products', { params: { category_id: selectedCategory } }).then((r) => r.data),
-  });
+  const quickProductsCount = useMemo(() => allProducts.filter((p: any) => p.is_quick_access).length, [allProducts]);
 
-  // Send Order Mutation
   const sendOrderMutation = useMutation({
-    mutationFn: () =>
-      api.post('/orders', {
-        session_id: sessionId,
-        items: cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity, note: i.note })),
-        kitchen_note: kitchenNote,
-      }),
+    mutationFn: () => api.post('/orders', {
+      session_id: sessionId,
+      items: cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, note: i.note })),
+      kitchen_note: kitchenNote,
+    }),
     onSuccess: () => {
-      toast.success(cafe?.kitchen_enabled ? 'Sipariş mutfağa iletildi!' : 'Sipariş masaya eklendi!');
+      toast.success(cafe?.kitchen_enabled ? 'Sipariş mutfağa iletildi' : 'Sipariş kaydedildi');
       setCart([]);
       setKitchenNote('');
       qc.invalidateQueries({ queryKey: ['session', sessionId] });
@@ -90,463 +168,708 @@ export default function TableSessionDeskPage() {
     onError: (e: any) => toast.error(e.response?.data?.error || 'Sipariş kaydedilemedi'),
   });
 
-  // Cancel / Abort Session Mutation (Frees up table)
   const cancelSessionMutation = useMutation({
     mutationFn: () => api.post(`/sessions/${sessionId}/cancel`),
-    onSuccess: () => {
-      toast.success('Masa boşaltıldı');
-      qc.invalidateQueries({ queryKey: ['tables'] });
-      router.push('/waiter');
-    },
+    onSuccess: () => { toast.success('Masa boşaltıldı'); qc.invalidateQueries({ queryKey: ['tables'] }); router.push('/waiter'); },
     onError: (e: any) => toast.error(e.response?.data?.error || 'Masa iptal edilemedi'),
   });
 
-  // Transfer Table Mutation
   const transferMutation = useMutation({
-    mutationFn: (targetName: string) =>
-      api.post(`/sessions/${sessionId}/transfer`, {
-        target_table_name: targetName,
-      }),
+    mutationFn: (targetTableId: number) => api.post(`/sessions/${sessionId}/transfer`, { target_table_id: targetTableId }),
     onSuccess: (res) => {
-      toast.success(`Masa ${transferTarget.toUpperCase()} masasına aktarıldı`);
+      toast.success('Masa aktarıldı');
       qc.invalidateQueries({ queryKey: ['tables'] });
-      if (res.data?.target_session_id) {
-        router.push(`/waiter/session/${res.data.target_session_id}`);
-      } else {
-        router.push('/waiter');
-      }
+      if (res.data?.target_session_id) router.push(`/waiter/session/${res.data.target_session_id}`);
+      else router.push('/waiter');
     },
     onError: (e: any) => toast.error(e.response?.data?.error || 'Masa taşıma başarısız'),
   });
 
-  // Cart operations
-  const addToCart = (product: any) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.product_id === product.id);
-      if (existing) {
-        return prev.map((i) => (i.product_id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+  // Edit quantity of an already delivered item on the table
+  const updateDeliveredItemMutation = useMutation({
+    mutationFn: ({ itemId, quantity }: { itemId: number; quantity: number }) =>
+      api.patch(`/orders/items/${itemId}`, { quantity }),
+    onSuccess: () => {
+      toast.success('Ürün adedi güncellendi');
+      qc.invalidateQueries({ queryKey: ['session', sessionId] });
+      qc.invalidateQueries({ queryKey: ['orders', sessionId] });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error || 'Güncellenemedi'),
+  });
+
+  // Delete an already delivered item from the table
+  const deleteDeliveredItemMutation = useMutation({
+    mutationFn: (itemId: number) => api.delete(`/orders/items/${itemId}`),
+    onSuccess: () => {
+      toast.success('Ürün masadan kaldırıldı');
+      qc.invalidateQueries({ queryKey: ['session', sessionId] });
+      qc.invalidateQueries({ queryKey: ['orders', sessionId] });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error || 'Silinemedi'),
+  });
+
+  const handleUpdateDeliveredQty = (item: any, delta: number) => {
+    if (!canEditTableItems) return toast.error('Masadaki ürünleri düzenleme yetkiniz yok');
+    const newQty = item.quantity + delta;
+    if (newQty <= 0) {
+      if (confirm(`${item.product_name} ürününü masadan tamamen silmek istiyor musunuz?`)) {
+        deleteDeliveredItemMutation.mutate(item.id);
       }
-      return [
-        ...prev,
-        {
-          product_id: product.id,
-          name: product.name,
-          price: Number(product.price),
-          quantity: 1,
-          note: '',
-        },
-      ];
+    } else {
+      updateDeliveredItemMutation.mutate({ itemId: item.id, quantity: newQty });
+    }
+  };
+
+  const handleDeleteDeliveredItem = (item: any) => {
+    if (!canEditTableItems) return toast.error('Masadaki ürünleri silme yetkiniz yok');
+    if (confirm(`${item.product_name} ürününü masadan tamamen silmek istiyor musunuz?`)) {
+      deleteDeliveredItemMutation.mutate(item.id);
+    }
+  };
+
+  const addToCart = useCallback((product: any) => {
+    setCart(prev => {
+      const existing = prev.find(i => i.product_id === product.id);
+      if (existing) return prev.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      return [...prev, { product_id: product.id, name: product.name, price: Number(product.price), quantity: 1, note: '' }];
     });
-  };
+  }, []);
 
-  const updateQty = (productId: number, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((i) => (i.product_id === productId ? { ...i, quantity: i.quantity + delta } : i))
-        .filter((i) => i.quantity > 0)
-    );
-  };
+  const updateQty = useCallback((productId: number, delta: number) => {
+    setCart(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: i.quantity + delta } : i).filter(i => i.quantity > 0));
+  }, []);
 
-  const removeFromCart = (productId: number) => {
-    setCart((prev) => prev.filter((i) => i.product_id !== productId));
-  };
-
-  const saveNote = (productId: number) => {
-    setCart((prev) => prev.map((i) => (i.product_id === productId ? { ...i, note: noteText } : i)));
+  const saveNote = useCallback((productId: number) => {
+    setCart(prev => prev.map(i => i.product_id === productId ? { ...i, note: noteText } : i));
     setNoteFor(null);
     setNoteText('');
-  };
+  }, [noteText]);
 
-  // Flatten delivered items from existing orders
   const deliveredItems = useMemo(() => {
     const list: any[] = [];
-    orders.forEach((o: any) => {
-      o.items?.forEach((it: any) => {
-        list.push({ ...it, order_status: o.status, order_id: o.id });
-      });
-    });
+    orders.forEach((o: any) => o.items?.forEach((it: any) => list.push({ ...it, order_status: o.status, order_id: o.id })));
     return list;
   }, [orders]);
-
-  // Tab state for mobile view (which column is visible)
-  const [mobileTab, setMobileTab] = useState<'items' | 'menu'>('menu');
-
-  // Handle Close / Exit – ALWAYS just goes back, never auto-cancels
-  const handleExit = () => {
-    router.push('/waiter');
-  };
 
   const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
   const deliveredTotal = Number(session?.total_amount || 0);
   const grandTotal = deliveredTotal + cartTotal;
-
   const tableName = session?.table_name || 'Masa';
 
-  return (
-    <div className="h-screen w-screen overflow-hidden bg-[#dde6ed] text-slate-800 flex flex-col font-sans select-none p-2 sm:p-4">
-      {/* ─── Top Bar ─── */}
-      <div className="flex items-center justify-between mb-2 flex-shrink-0 gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="bg-[#8faebe] text-white font-black text-base sm:text-xl px-4 sm:px-6 py-2 rounded-2xl shadow-sm tracking-wide flex-shrink-0">
-            {tableName}
-          </div>
-          {session?.area_name && (
-            <span className="text-xs font-bold px-2 sm:px-3 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-300 shadow-xs truncate hidden sm:block">
-              {session.area_name}
-            </span>
-          )}
-          {/* Mobile: amount badge */}
-          {grandTotal > 0 && (
-            <span className="text-xs font-black px-2 py-1.5 rounded-xl bg-orange-500 text-white shadow-xs flex-shrink-0 sm:hidden">
-              ₺{Math.round(grandTotal)}
-            </span>
-          )}
-        </div>
+  const transferableTables = tables.filter((t: any) => t.id !== session?.table_id);
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Mobile tab toggle */}
-          <div className="flex sm:hidden bg-white/80 rounded-xl border border-slate-300 p-0.5 gap-0.5">
-            <button
-              onClick={() => setMobileTab('menu')}
-              className={clsx('px-2.5 py-1 rounded-lg text-[11px] font-black transition-all', mobileTab === 'menu' ? 'bg-orange-500 text-white' : 'text-slate-600')}
-            >Menü</button>
-            <button
-              onClick={() => setMobileTab('items')}
-              className={clsx('px-2.5 py-1 rounded-lg text-[11px] font-black transition-all', mobileTab === 'items' ? 'bg-[#38bdf8] text-white' : 'text-slate-600')}
-            >Sepet {cart.length > 0 && `(${cart.length})`}</button>
-          </div>
-
-          {/* Masayı Boşalt – only when no items */}
-          {deliveredItems.length === 0 && cart.length === 0 && (
-            <button
-              onClick={() => cancelSessionMutation.mutate()}
-              disabled={cancelSessionMutation.isPending}
-              className="bg-white hover:bg-red-50 text-red-600 font-bold px-2.5 sm:px-3.5 py-2 rounded-2xl shadow-xs border border-red-200 text-xs flex items-center gap-1 transition-all active:scale-95"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Masayı Boşalt</span>
-            </button>
-          )}
-
-          {/* Ödeme shortcut on mobile */}
-          {(deliveredItems.length > 0 || cart.length > 0) && (
-            <button
-              onClick={() => router.push(`/cashier/session/${sessionId}`)}
-              className="sm:hidden bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold px-3 py-2 rounded-2xl text-xs flex items-center gap-1 shadow-xs active:scale-95"
-            >
-              <CreditCard className="w-3.5 h-3.5" />
-              Ödeme
-            </button>
-          )}
-
-          {/* X – always just goes back, never cancels */}
-          <button
-            onClick={handleExit}
-            className="bg-white/80 hover:bg-white text-slate-600 hover:text-slate-900 w-10 h-10 sm:w-11 sm:h-11 rounded-2xl shadow-sm flex items-center justify-center transition-all active:scale-95 border border-slate-300/60"
-            title="Masadan Çık"
+  // Render product card
+  const renderProductCard = (prod: any, isMobile: boolean) => {
+    const cartItem = cart.find(i => i.product_id === prod.id);
+    return (
+      <button
+        key={prod.id}
+        onClick={() => addToCart(prod)}
+        className={clsx(
+          'rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between text-left transition-all active:scale-95 group relative border min-w-0 w-full',
+          cartItem ? '' : 'hover:border-white/25'
+        )}
+        style={{
+          minHeight: isMobile ? '80px' : '82px',
+          background: cartItem ? 'rgba(255,102,0,0.18)' : 'var(--card-hover)',
+          borderColor: cartItem ? 'var(--brand)' : 'var(--border)',
+          boxShadow: cartItem ? `inset 0 0 0 1px var(--brand)` : undefined,
+        }}
+      >
+        {cartItem && (
+          <span
+            className="absolute top-2 right-2 w-5 h-5 text-white text-[11px] font-black rounded-full flex items-center justify-center shadow-sm"
+            style={{ background: 'var(--brand)' }}
           >
-            <X className="w-5 h-5 sm:w-6 sm:h-6" />
-          </button>
+            {cartItem.quantity}
+          </span>
+        )}
+        <div className="min-w-0 pr-4">
+          <p className={clsx('font-bold line-clamp-2 leading-snug group-hover:opacity-90 transition-opacity', isMobile ? 'text-xs' : 'text-xs')} style={{ color: 'var(--text)' }}>
+            {prod.name}
+          </p>
+          {prod.category_name && !isMobile && (
+            <p className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{prod.category_name}</p>
+          )}
         </div>
-      </div>
+        <div className="flex items-center justify-between mt-1">
+          <p className="font-black text-xs sm:text-sm" style={{ color: 'var(--brand)' }}>₺{Number(prod.price).toFixed(0)}</p>
+          {cartItem && (
+            <span className="text-[10px] font-bold" style={{ color: 'var(--text-2)' }}>+1</span>
+          )}
+        </div>
+      </button>
+    );
+  };
 
-      {/* ─── Main POS Workspace ─── */}
-      {/* Desktop: 3 columns. Mobile: tab-based (menu=menü, items=sepet) */}
-      <div className="flex-1 grid grid-cols-12 gap-2 sm:gap-3 min-h-0">
-        {/* ─── COLUMN 1: Masadaki Ürünler (Left Box) ─── */}
-        <div className={clsx(
-          'col-span-12 sm:col-span-4 md:col-span-3 lg:col-span-3 flex flex-col min-h-0 bg-transparent',
-          // On mobile show only if mobileTab === 'items'
-          mobileTab === 'items' ? 'flex' : 'hidden sm:flex'
-        )}>
-          <div className="flex items-center justify-between mb-1.5 px-1">
-            <h2 className="text-sm font-bold text-slate-700">Masadaki Ürünler</h2>
-            <span className="text-[11px] font-bold text-slate-500">
-              {deliveredItems.length + cart.length} ürün
-            </span>
-          </div>
-
-          <div className="flex-1 overflow-hidden bg-[#c4d4dc] rounded-3xl p-3 flex flex-col justify-between border border-slate-300/60 shadow-inner">
-            {/* Scrollable Items Container */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              {/* 1. Pending Cart Items */}
-              {cart.length > 0 && (
-                <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold text-orange-700 uppercase tracking-wider px-1">
-                    Yeni Eklenecekler ({cart.length})
-                  </div>
-                  {cart.map((item) => (
-                    <div
-                      key={item.product_id}
-                      className="bg-white rounded-2xl p-2.5 shadow-sm border border-orange-200 space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-slate-900 truncate flex-1">{item.name}</span>
-                        <span className="font-bold text-xs text-orange-600 ml-2">
-                          ₺{(item.price * item.quantity).toFixed(0)}
-                        </span>
-                      </div>
-
-                      {item.note && (
-                        <div className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200 font-medium">
-                          Not: {item.note}
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                        <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-0.5">
-                          <button
-                            onClick={() => updateQty(item.product_id, -1)}
-                            className="w-6 h-6 rounded-lg bg-white shadow-xs flex items-center justify-center text-slate-700 hover:bg-slate-50 active:scale-95"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="font-black text-xs px-2 text-slate-800">{item.quantity}</span>
-                          <button
-                            onClick={() => updateQty(item.product_id, 1)}
-                            className="w-6 h-6 rounded-lg bg-white shadow-xs flex items-center justify-center text-slate-700 hover:bg-slate-50 active:scale-95"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => {
-                              setNoteFor(item.product_id);
-                              setNoteText(item.note);
-                            }}
-                            className={clsx(
-                              'p-1.5 rounded-xl transition-colors',
-                              item.note
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'text-slate-400 hover:text-slate-700'
-                            )}
-                            title="Not Ekle"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => removeFromCart(item.product_id)}
-                            className="p-1.5 rounded-xl text-slate-400 hover:text-red-500 transition-colors"
-                            title="Sil"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* 2. Existing Sent Orders */}
-              {deliveredItems.length > 0 && (
-                <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
-                    Masada Olan Ürünler ({deliveredItems.length})
-                  </div>
-                  {deliveredItems.map((it: any) => (
-                    <div
-                      key={it.id}
-                      className="bg-white/80 rounded-2xl p-2.5 shadow-sm border border-slate-200 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs font-bold text-slate-800 truncate">{it.product_name}</p>
-                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
-                            x{it.quantity}
-                          </span>
-                        </div>
-                        <p className="text-[11px] font-semibold text-slate-600">
-                          ₺{(Number(it.unit_price) * it.quantity).toFixed(0)}
-                        </p>
-                        {it.note && <p className="text-[10px] text-slate-500 italic">Not: {it.note}</p>}
-                      </div>
-                      <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-xl">
-                        <CheckCircle2 className="w-3 h-3" />
-                        <span>Siparişte</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {cart.length === 0 && deliveredItems.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center p-6">
-                  <Coffee className="w-10 h-10 mb-2 opacity-40" />
-                  <p className="text-xs font-semibold">Masada henüz ürün yok</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Sağdaki menüden ürün seçebilirsiniz</p>
-                </div>
+  return (
+    <MainLayout>
+      <div className="flex flex-col h-[calc(100dvh-52px-1px)] overflow-hidden min-w-0 w-full">
+        {/* ─── Top Bar ─── */}
+        <div className="flex items-center justify-between gap-3 mb-2.5 flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => router.push('/waiter')}
+              className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors flex-shrink-0"
+              style={{ color: 'var(--text-2)' }}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div className="min-w-0">
+              <p className="text-sm font-black truncate leading-none" style={{ color: 'var(--text)' }}>{tableName}</p>
+              {session?.area_name && (
+                <p className="text-[11px] leading-none mt-0.5" style={{ color: 'var(--text-muted)' }}>{session.area_name}</p>
               )}
             </div>
+            {grandTotal > 0 && (
+              <span className="hidden sm:block text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0" style={{ background: 'var(--card)', color: 'var(--text-2)', border: '1px solid var(--border)' }}>
+                Toplam: ₺{grandTotal.toFixed(0)}
+              </span>
+            )}
+          </div>
 
-            {/* Bottom Quick Action for Left Column */}
-            {cart.length > 0 && (
-              <div className="pt-2 mt-2 border-t border-slate-300/60">
-                <button
-                  onClick={() => sendOrderMutation.mutate()}
-                  disabled={sendOrderMutation.isPending}
-                  className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold py-2.5 rounded-2xl shadow-md flex items-center justify-center gap-2 text-xs transition-all active:scale-[0.99] disabled:opacity-50"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>
-                    {cafe?.kitchen_enabled ? 'Mutfağa Gönder' : 'Siparişi Onayla & Kaydet'} ({cart.length})
-                  </span>
-                </button>
-              </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => setShowTransferModal(true)}
+              className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text-2)' }}
+              title="Masayı Taşı / Aktar"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" style={{ color: 'var(--sky)' }} />
+              <span className="hidden sm:inline">Masayı Taşı</span>
+            </button>
+
+            {deliveredItems.length === 0 && cart.length === 0 && (
+              <button
+                onClick={() => cancelSessionMutation.mutate()}
+                disabled={cancelSessionMutation.isPending}
+                className="flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text-2)' }}
+              >
+                <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--danger)' }} />
+                <span className="hidden sm:inline">Boşalt</span>
+              </button>
+            )}
+
+            {canPay && grandTotal > 0 && (
+              <button
+                onClick={() => router.push(`/cashier/session/${sessionId}`)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow-sm"
+                style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Ödeme</span>
+              </button>
             )}
           </div>
         </div>
 
-        {/* ─── COLUMN 2: Ürün Ekle - Kategoriler (Middle Box) ─── */}
-        <div className={clsx(
-          'col-span-12 sm:col-span-4 md:col-span-4 lg:col-span-4 flex flex-col min-h-0 bg-transparent',
-          mobileTab === 'menu' ? 'flex' : 'hidden sm:flex'
-        )}>
-          <div className="flex items-center justify-between mb-1.5 px-1">
-            <h2 className="text-sm font-bold text-slate-700">Kategoriler</h2>
-          </div>
-
-          <div className="flex-1 overflow-hidden bg-[#c4d4dc] rounded-3xl p-3 flex flex-col border border-slate-300/60 shadow-inner">
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              {categories.map((cat: any) => {
-                const isSelected = selectedCategory === cat.id;
-                const catIcon = cat.icon || '☕';
-                return (
-                  <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={clsx(
-                      'w-full py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm text-left transition-all duration-150 active:scale-98 shadow-xs border flex items-center gap-2',
-                      isSelected
-                        ? 'bg-white text-slate-900 border-2 border-orange-400 shadow-md ring-2 ring-orange-400/20'
-                        : 'bg-white/80 hover:bg-white text-slate-700 border-slate-200/80'
-                    )}
-                  >
-                    <span className="text-lg leading-none flex-shrink-0">{catIcon}</span>
-                    <span className="truncate">{cat.name}</span>
-                  </button>
-                );
-              })}
+        {/* ─── Desktop 3-Column Layout ─── */}
+        <div className="hidden md:flex flex-1 gap-3 min-h-0 overflow-hidden min-w-0 w-full">
+          {/* Col 1: Ordered items & Cart */}
+          <div className="w-64 lg:w-72 flex flex-col min-h-0 flex-shrink-0">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Masadaki Ürünler</h2>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--card-hover)', color: 'var(--text)' }}>
+                {deliveredItems.length + cart.length}
+              </span>
             </div>
-          </div>
-        </div>
+            <div className="flex-1 rounded-2xl p-2.5 flex flex-col overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+                {/* Pending cart */}
+                {cart.length > 0 && (
+                  <div className="rounded-xl p-2" style={{ background: 'rgba(255,102,0,0.10)', border: '1px solid rgba(255,102,0,0.25)' }}>
+                    <p className="text-[10px] font-black uppercase tracking-wider mb-1 flex items-center gap-1" style={{ color: 'var(--brand)' }}>
+                      <Sparkles className="w-3 h-3" />
+                      <span>Yeni Eklenecekler ({cart.length})</span>
+                    </p>
+                    {cart.map(item => (
+                      <CartItemRow
+                        key={item.product_id}
+                        item={item}
+                        onUpdate={d => updateQty(item.product_id, d)}
+                        onRemove={() => setCart(p => p.filter(i => i.product_id !== item.product_id))}
+                        onNote={() => { setNoteFor(item.product_id); setNoteText(item.note); }}
+                      />
+                    ))}
+                  </div>
+                )}
 
-        {/* ─── COLUMN 3: Ürünler Grid + Taşı/Birleştir + Toplam Tutar (Right Box) ─── */}
-        <div className={clsx(
-          'col-span-12 sm:col-span-4 md:col-span-5 lg:col-span-5 flex flex-col min-h-0 justify-between gap-2',
-          mobileTab === 'menu' ? 'flex' : 'hidden sm:flex'
-        )}>
-          {/* Top: Product Selection Grid */}
-          <div className="flex-1 overflow-hidden bg-[#c4d4dc] rounded-3xl p-3 flex flex-col border border-slate-300/60 shadow-inner min-h-0">
-            <div className="flex items-center justify-between mb-2 px-1">
-              <span className="text-xs font-bold text-slate-600">Ürün Seçimi</span>
-              <span className="text-[11px] font-semibold text-slate-500">{products.length} ürün</span>
-            </div>
+                {/* Delivered items on table */}
+                {deliveredItems.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wider px-1" style={{ color: 'var(--text-muted)' }}>Masada Olanlar</p>
+                    {deliveredItems.map((it: any) => (
+                      <div
+                        key={it.id}
+                        className="flex items-center justify-between p-2 rounded-xl text-xs gap-1.5 transition-all"
+                        style={{ background: 'var(--card-hover)', border: '1px solid var(--border-sub)' }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold truncate text-xs" style={{ color: 'var(--text)' }}>
+                            {it.product_name}
+                          </p>
+                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            ₺{(Number(it.unit_price) * it.quantity).toFixed(0)}
+                          </p>
+                        </div>
 
-            <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                {products.map((prod: any) => {
-                  const icon = prod.category_icon || '☕';
-                  return (
-                    <button
-                      key={prod.id}
-                      onClick={() => addToCart(prod)}
-                      className="h-20 bg-white hover:bg-slate-50 active:scale-95 rounded-2xl p-2.5 shadow-xs border border-slate-200/80 flex flex-col justify-between text-left transition-all group"
-                    >
-                      <div className="flex items-start justify-between">
-                        <p className="font-bold text-xs text-slate-800 line-clamp-2 leading-tight group-hover:text-orange-600 flex-1">
-                          {prod.name}
-                        </p>
-                        <span className="text-base leading-none ml-1">{icon}</span>
+                        {/* Editing buttons if user has permission */}
+                        {canEditTableItems ? (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="flex items-center rounded-lg overflow-hidden" style={{ background: 'var(--panel)' }}>
+                              <button
+                                onClick={() => handleUpdateDeliveredQty(it, -1)}
+                                className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all"
+                                style={{ color: 'var(--text)' }}
+                                title="Azalt"
+                              >
+                                <Minus className="w-2.5 h-2.5" />
+                              </button>
+                              <span className="w-5 text-center text-xs font-black" style={{ color: 'var(--brand)' }}>
+                                {it.quantity}
+                              </span>
+                              <button
+                                onClick={() => handleUpdateDeliveredQty(it, 1)}
+                                className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90 transition-all"
+                                style={{ color: 'var(--text)' }}
+                                title="Arttır"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteDeliveredItem(it)}
+                              className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors"
+                              style={{ background: 'rgba(248,113,113,0.12)', color: 'var(--danger)' }}
+                              title="Masadan Sil"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="font-black text-xs" style={{ color: 'var(--brand)' }}>x{it.quantity}</span>
+                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--success)' }} />
+                          </div>
+                        )}
                       </div>
-                      <p className="font-black text-xs text-slate-900">₺{Number(prod.price).toFixed(0)}</p>
-                    </button>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
 
-                {products.length === 0 && (
-                  <div className="col-span-3 py-10 text-center text-slate-400 text-xs">
-                    Bu kategoride henüz ürün bulunmuyor
+                {cart.length === 0 && deliveredItems.length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center py-10" style={{ color: 'var(--text-muted)' }}>
+                    <Coffee className="w-8 h-8 mb-1.5 opacity-30" />
+                    <p className="text-xs font-bold" style={{ color: 'var(--text-2)' }}>Masada henüz ürün yok</p>
+                    <p className="text-[10px] mt-0.5">Menüden ürün ekleyin</p>
+                  </div>
+                )}
+              </div>
+
+              {cart.length > 0 && (
+                <div className="pt-2 mt-1 space-y-1.5" style={{ borderTop: '1px solid var(--border)' }}>
+                  <input
+                    value={kitchenNote}
+                    onChange={e => setKitchenNote(e.target.value)}
+                    placeholder="Mutfak / Aşçı notu..."
+                    className="w-full rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-orange-500"
+                    style={{ background: 'var(--card-hover)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  />
+                  <button
+                    onClick={() => sendOrderMutation.mutate()}
+                    disabled={sendOrderMutation.isPending}
+                    className="w-full text-white font-black py-2.5 rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] disabled:opacity-50"
+                    style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{cafe?.kitchen_enabled ? 'Mutfağa Gönder' : 'Siparişi Kaydet'} · ₺{cartTotal.toFixed(0)}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Col 2: Categories */}
+          <div className="w-44 lg:w-48 flex flex-col min-h-0 flex-shrink-0">
+            <h2 className="text-xs font-bold uppercase tracking-wider mb-1.5 px-1" style={{ color: 'var(--text-muted)' }}>Kategoriler</h2>
+            <div className="flex-1 rounded-2xl p-2 overflow-y-auto custom-scrollbar space-y-1" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <button
+                onClick={() => setSelectedCategory('quick')}
+                className={clsx('w-full py-2 px-2.5 rounded-xl font-bold text-xs text-left transition-all flex items-center gap-2 border')}
+                style={selectedCategory === 'quick'
+                  ? { background: 'rgba(245,158,11,0.18)', color: 'var(--brand)', borderColor: 'rgba(245,158,11,0.40)' }
+                  : { color: 'var(--text-2)', borderColor: 'transparent' }}
+              >
+                <Zap className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--brand)' }} />
+                <span className="truncate flex-1">⚡ Hızlı Menü</span>
+                {quickProductsCount > 0 && (
+                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded" style={{ background: 'rgba(245,158,11,0.20)', color: 'var(--brand)' }}>{quickProductsCount}</span>
+                )}
+              </button>
+              <button
+                onClick={() => setSelectedCategory('all')}
+                className={clsx('w-full py-2 px-2.5 rounded-xl font-bold text-xs text-left transition-all flex items-center gap-2 border')}
+                style={selectedCategory === 'all'
+                  ? { background: 'rgba(255,102,0,0.18)', color: 'var(--brand)', borderColor: 'rgba(255,102,0,0.40)' }
+                  : { color: 'var(--text-2)', borderColor: 'transparent' }}
+              >
+                <Layers className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--brand)' }} />
+                <span className="truncate flex-1">Tüm Ürünler</span>
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>{allProducts.length}</span>
+              </button>
+              <div className="h-px my-1" style={{ background: 'var(--border)' }} />
+              {categories.map((cat: any) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={clsx('w-full py-2 px-2.5 rounded-xl font-bold text-xs text-left transition-all flex items-center gap-2 border')}
+                  style={selectedCategory === cat.id
+                    ? { background: 'rgba(255,102,0,0.18)', color: 'var(--brand)', borderColor: 'rgba(255,102,0,0.40)' }
+                    : { color: 'var(--text-2)', borderColor: 'transparent' }}
+                >
+                  <span className="text-sm leading-none flex-shrink-0">{cat.icon || '☕'}</span>
+                  <span className="truncate flex-1">{cat.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Col 3: Products Grid + Total Bar */}
+          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+            <div className="flex items-center justify-between gap-2 mb-1.5 px-1 flex-shrink-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <h2 className="text-xs font-bold uppercase tracking-wider truncate" style={{ color: 'var(--text-muted)' }}>
+                  {selectedCategory === 'quick' ? '⚡ Hızlı Menü' : selectedCategory === 'all' ? 'Tüm Ürünler' : 'Ürünler'}
+                </h2>
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>({displayedProducts.length})</span>
+              </div>
+              <div className="relative w-40 lg:w-52 flex-shrink-0">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="Ara..."
+                  className="w-full pl-8 pr-2.5 py-1 rounded-xl text-xs focus:outline-none focus:border-orange-500"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                />
+              </div>
+            </div>
+
+            {/* Product Cards Grid with min-w-0 */}
+            <div className="flex-1 rounded-2xl p-2.5 flex flex-col overflow-hidden min-w-0" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div className="flex-1 overflow-y-auto custom-scrollbar pr-0.5">
+                <div className="grid grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
+                  {displayedProducts.map((prod: any) => renderProductCard(prod, false))}
+                </div>
+                {displayedProducts.length === 0 && (
+                  <div className="py-16 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <p className="font-bold">Ürün bulunamadı</p>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Bottom Bar: Total Amount & Checkout Button */}
+            <div className="flex items-center justify-between p-2.5 rounded-2xl mt-2 flex-shrink-0 gap-2" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: 'var(--text-muted)' }}>Toplam Tutar</span>
+                <span className="text-base font-black" style={{ color: 'var(--text)' }}>₺{grandTotal.toFixed(0)}</span>
+              </div>
+              {canPay ? (
+                <button
+                  onClick={() => router.push(`/cashier/session/${sessionId}`)}
+                  className="text-white font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 flex-shrink-0"
+                  style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Hesap &amp; Ödeme</span>
+                </button>
+              ) : (
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Ödeme Yetkisi Yok</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── Mobile Layout ─── */}
+        <div className="flex flex-col flex-1 min-h-0 md:hidden overflow-hidden">
+          {/* Mobile Tab Switcher */}
+          <div className="flex items-center flex-shrink-0 p-1 gap-1 rounded-xl mb-2" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <button
+              onClick={() => setMobileTab('menu')}
+              className={clsx('flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all')}
+              style={mobileTab === 'menu'
+                ? { background: 'var(--brand)', color: '#fff' }
+                : { color: 'var(--text-2)' }}
+            >
+              <Coffee className="w-3.5 h-3.5" />
+              Menü
+            </button>
+            <button
+              onClick={() => setMobileTab('cart')}
+              className={clsx('flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all relative')}
+              style={mobileTab === 'cart'
+                ? { background: 'var(--brand)', color: '#fff' }
+                : { color: 'var(--text-2)' }}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              Sepet &amp; Masa
+              {cart.length > 0 && (
+                <span className="min-w-[16px] h-4 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1" style={{ background: 'var(--danger)' }}>
+                  {cart.length}
+                </span>
+              )}
+            </button>
           </div>
 
-          {/* Bottom Controls: Taşı/Birleştir & Toplam Tutar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-shrink-0">
-            {/* Taşı / Birleştir Box */}
-            <div className="bg-[#c4d4dc] rounded-2xl p-2.5 border border-slate-300/60 shadow-inner flex flex-col justify-between">
-              <span className="text-[11px] font-bold text-slate-600 mb-1 block">Taşı / Birleştir</span>
-              <div className="flex items-center gap-1.5">
-                <input
-                  value={transferTarget}
-                  onChange={(e) => setTransferTarget(e.target.value)}
-                  placeholder="Masa (A7, B2)"
-                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 uppercase placeholder-slate-400 focus:outline-none focus:border-orange-500"
-                />
+          {/* Mobile: Menu Tab */}
+          {mobileTab === 'menu' && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-2">
+              <div className="flex-shrink-0 overflow-x-auto custom-scrollbar flex gap-1.5 pb-0.5">
                 <button
-                  onClick={() => {
-                    if (!transferTarget.trim()) return toast.error('Hedef masa adını yazın');
-                    transferMutation.mutate(transferTarget.trim());
-                  }}
-                  disabled={transferMutation.isPending}
-                  className="bg-white hover:bg-slate-50 text-slate-800 w-9 h-8 rounded-xl font-bold flex items-center justify-center shadow-xs border border-slate-300 active:scale-95"
+                  onClick={() => setSelectedCategory('quick')}
+                  className={clsx('flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border')}
+                  style={selectedCategory === 'quick'
+                    ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }
+                    : { background: 'var(--card)', color: 'var(--brand)', borderColor: 'rgba(255,102,0,0.30)' }}
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>⚡ Hızlı</span>
+                </button>
+                <button
+                  onClick={() => setSelectedCategory('all')}
+                  className={clsx('flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border')}
+                  style={selectedCategory === 'all'
+                    ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }
+                    : { background: 'var(--card)', color: 'var(--text-2)', borderColor: 'var(--border)' }}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Tümü</span>
+                </button>
+                {categories.map((cat: any) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={clsx('flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border')}
+                    style={selectedCategory === cat.id
+                      ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' }
+                      : { background: 'var(--card)', color: 'var(--text-2)', borderColor: 'var(--border)' }}
+                  >
+                    <span>{cat.icon || '☕'}</span>
+                    <span>{cat.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative flex-shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="Ürün ara..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl text-xs focus:outline-none focus:border-orange-500"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                />
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-2 gap-2 pb-2">
+                  {displayedProducts.map((prod: any) => renderProductCard(prod, true))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Mobile: Cart & Table Items Tab */}
+          {mobileTab === 'cart' && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto custom-scrollbar rounded-2xl p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+                {cart.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--brand)' }}>Yeni Eklenecekler</p>
+                    {cart.map(item => (
+                      <CartItemRow
+                        key={item.product_id}
+                        item={item}
+                        onUpdate={d => updateQty(item.product_id, d)}
+                        onRemove={() => setCart(p => p.filter(i => i.product_id !== item.product_id))}
+                        onNote={() => { setNoteFor(item.product_id); setNoteText(item.note); }}
+                      />
+                    ))}
+                  </div>
+                )}
+                {deliveredItems.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Masada Olanlar</p>
+                    {deliveredItems.map((it: any) => (
+                      <div key={it.id} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: 'var(--border-sub)' }}>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold truncate" style={{ color: 'var(--text)' }}>{it.product_name}</p>
+                          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>₺{(Number(it.unit_price) * it.quantity).toFixed(0)}</p>
+                        </div>
+
+                        {canEditTableItems ? (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="flex items-center rounded-lg overflow-hidden" style={{ background: 'var(--card-hover)' }}>
+                              <button
+                                onClick={() => handleUpdateDeliveredQty(it, -1)}
+                                className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90"
+                                style={{ color: 'var(--text)' }}
+                              >
+                                <Minus className="w-2.5 h-2.5" />
+                              </button>
+                              <span className="w-5 text-center text-xs font-black" style={{ color: 'var(--brand)' }}>{it.quantity}</span>
+                              <button
+                                onClick={() => handleUpdateDeliveredQty(it, 1)}
+                                className="w-6 h-6 flex items-center justify-center hover:bg-white/10 active:scale-90"
+                                style={{ color: 'var(--text)' }}
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteDeliveredItem(it)}
+                              className="w-6 h-6 rounded-lg flex items-center justify-center"
+                              style={{ background: 'rgba(248,113,113,0.12)', color: 'var(--danger)' }}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <span className="font-black text-xs" style={{ color: 'var(--brand)' }}>x{it.quantity}</span>
+                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--success)' }} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {cart.length === 0 && deliveredItems.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-10" style={{ color: 'var(--text-muted)' }}>
+                    <Coffee className="w-8 h-8 mb-1.5 opacity-30" />
+                    <p className="text-xs">Sepet boş</p>
+                    <button onClick={() => setMobileTab('menu')} className="mt-2 text-xs font-bold" style={{ color: 'var(--brand)' }}>
+                      Menüden ürün seç →
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-shrink-0 mt-2 space-y-1.5">
+                {cart.length > 0 && (
+                  <input
+                    value={kitchenNote}
+                    onChange={e => setKitchenNote(e.target.value)}
+                    placeholder="Mutfak notu..."
+                    className="w-full rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-orange-500"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  />
+                )}
+                {cart.length > 0 && (
+                  <button
+                    onClick={() => sendOrderMutation.mutate()}
+                    disabled={sendOrderMutation.isPending}
+                    className="w-full text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-sm shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
+                    style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{cafe?.kitchen_enabled ? 'Mutfağa Gönder' : 'Siparişi Kaydet'} · ₺{cartTotal.toFixed(0)}</span>
+                  </button>
+                )}
+                {grandTotal > 0 && canPay && (
+                  <button
+                    onClick={() => router.push(`/cashier/session/${sessionId}`)}
+                    className="w-full font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs transition-all active:scale-[0.98]"
+                    style={{ background: 'var(--card)', border: '1px solid rgba(255,102,0,0.40)', color: 'var(--brand)' }}
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Hesap &amp; Ödeme · ₺{grandTotal.toFixed(0)}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ─── Note Modal ─── */}
+        {noteFor !== null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <div className="w-full max-w-sm rounded-3xl p-5 shadow-2xl" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>Ürün Notu</h3>
+              <input
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveNote(noteFor); }}
+                placeholder="Örn: Az şekerli, sıcak olsun..."
+                className="w-full rounded-xl px-3.5 py-2.5 text-xs placeholder-slate-500 focus:outline-none focus:border-orange-500 mb-3"
+                style={{ background: 'var(--card-hover)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setNoteFor(null)} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: 'var(--app)', color: 'var(--text-2)' }}>
+                  İptal
+                </button>
+                <button
+                  onClick={() => saveNote(noteFor)}
+                  className="flex-1 text-white py-2 rounded-xl text-xs font-bold"
+                  style={{ background: 'var(--brand)' }}
+                >
+                  Kaydet
                 </button>
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Toplam Tutar Box & Hesap Link */}
-            <div className="bg-[#c4d4dc] rounded-2xl p-2.5 border border-slate-300/60 shadow-inner flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[11px] font-bold text-slate-600">Toplam Tutar:</span>
-                <span className="text-base font-black text-slate-900">₺{grandTotal.toFixed(0)}</span>
+        {/* ─── Table Transfer Modal ─── */}
+        {showTransferModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div className="flex items-center justify-between pb-2.5 mb-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <h3 className="text-sm font-bold" style={{ color: 'var(--text)' }}>Masayı Taşı / Aktar</h3>
+                  <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    <strong>{tableName}</strong> masasını başka bir masaya taşıyın
+                  </p>
+                </div>
+                <button onClick={() => setShowTransferModal(false)} className="p-1.5 rounded-xl hover:bg-white/10" style={{ color: 'var(--text-2)' }}>
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={() => router.push(`/cashier/session/${sessionId}`)}
-                className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-98"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span>Hesap / Ödeme</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* ─── Note Input Modal ─── */}
-      {noteFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-5 w-full max-w-xs shadow-2xl border border-slate-200">
-            <h3 className="text-xs font-bold text-slate-800 mb-2">Ürün Notu Ekle</h3>
-            <input
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="Örn: Az şekerli, Sıcak olsun..."
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold mb-3 focus:outline-none focus:border-orange-500"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => setNoteFor(null)}
-                className="flex-1 bg-slate-100 text-slate-600 py-1.5 rounded-xl text-xs font-semibold"
-              >
-                İptal
-              </button>
-              <button
-                onClick={() => saveNote(noteFor)}
-                className="flex-1 bg-orange-500 text-white py-1.5 rounded-xl text-xs font-bold"
-              >
-                Kaydet
-              </button>
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {transferableTables.map((t: any) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        if (confirm(`Masayı ${t.name} masasına aktarmak istediğinize emin misiniz?`)) {
+                          transferMutation.mutate(t.id);
+                          setShowTransferModal(false);
+                        }
+                      }}
+                      className="p-3 rounded-xl text-left border flex flex-col justify-between transition-all hover:scale-98 active:scale-95"
+                      style={{
+                        background: t.status === 'occupied' ? 'rgba(62,166,255,0.12)' : 'var(--card-hover)',
+                        borderColor: t.status === 'occupied' ? 'var(--sky)' : 'var(--border)',
+                      }}
+                    >
+                      <span className="font-bold text-xs" style={{ color: 'var(--text)' }}>{t.name}</span>
+                      <span className="text-[10px] mt-1" style={{ color: t.status === 'occupied' ? 'var(--sky)' : 'var(--success)' }}>
+                        {t.status === 'occupied' ? 'Dolu Masa' : 'Boş Masa'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </MainLayout>
   );
 }

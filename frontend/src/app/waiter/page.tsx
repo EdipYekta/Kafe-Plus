@@ -1,16 +1,13 @@
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import {
-  Coffee, CreditCard, ChefHat, BarChart3, Package,
-  Users, Settings, LogOut, Menu, X, MapPin, Receipt,
-  Plus, LayoutGrid, Trash2, Play, Clock, ChevronDown,
-  Layers, Hash
+  Coffee, CreditCard, X, Plus, Play, Clock, ChevronDown, Hash, Layers
 } from 'lucide-react';
-import Link from 'next/link';
+import MainLayout from '@/components/layout/MainLayout';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 
@@ -35,15 +32,9 @@ interface Area {
   table_count: number;
 }
 
-const ALL_NAV_ITEMS = [
-  { icon: MapPin,     label: 'Masa Haritası',          href: '/waiter',   roles: null },
-  { icon: CreditCard, label: 'Kasa, Ciro & Masraflar', href: '/cashier',  roles: ['Admin','Manager','Cashier'] },
-  { icon: ChefHat,    label: 'Mutfak Ekranı (KDS)',    href: '/kitchen',  roles: ['Admin','Manager','Cashier','Kitchen'] },
-  { icon: Package,    label: 'Ürünler & Menü',         href: '/products', roles: ['Admin','Manager'] },
-  { icon: Users,      label: 'Personel & Garsonlar',   href: '/staff',    roles: ['Admin','Manager'] },
-  { icon: Settings,   label: 'Sistem Ayarları',        href: '/settings', roles: ['Admin','Manager'] },
-  { icon: LayoutGrid, label: 'Genel Dashboard',        href: '/dashboard',roles: ['Admin','Manager','Cashier'] },
-];
+const inputClass =
+  'w-full border rounded-2xl px-4 py-2.5 text-sm font-semibold focus:outline-none focus:border-orange-500 transition-colors';
+const inputStyle = { background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' };
 
 // Elapsed time helper
 function useElapsedTime(openedAt: string | null | undefined) {
@@ -66,22 +57,13 @@ function useElapsedTime(openedAt: string | null | undefined) {
 
 export default function WaiterTableGridPage() {
   const router = useRouter();
-  const pathname = usePathname();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const queryClient = useQueryClient();
 
   const [selectedArea, setSelectedArea] = useState<number | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAddTableModal, setShowAddTableModal] = useState(false);
   const [selectedTableForAction, setSelectedTableForAction] = useState<Table | null>(null);
   const [areaDropdownOpen, setAreaDropdownOpen] = useState(false);
-
-  // Role-filtered nav
-  const navItems = ALL_NAV_ITEMS.filter(item =>
-    item.roles === null || item.roles.includes(user?.role || '')
-  );
-
-  const isAdmin = user?.role === 'Admin' || user?.role === 'Manager';
 
   // Fetch Areas
   const { data: areas = [] } = useQuery<Area[]>({
@@ -143,133 +125,24 @@ export default function WaiterTableGridPage() {
     });
   }, [tables, selectedArea]);
 
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
-  };
-
-  const initials =
-    user?.full_name
-      ?.split(' ')
-      .map((n: string) => n[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase() || 'K+';
-
   const occupiedCount = tables.filter((t) => t.status === 'occupied' || !!t.current_session_id).length;
   const selectedAreaName = selectedArea ? areas.find(a => a.id === selectedArea)?.name || 'Seçili Alan' : 'Tüm Masalar';
 
   return (
-    <div className="h-[100dvh] w-screen overflow-hidden bg-[#dde6ed] text-slate-800 flex flex-col font-sans select-none">
-      {/* Backdrop */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 backdrop-blur-[2px]"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ─── Slide-out Sidebar ─── */}
-      <aside
-        className={clsx(
-          'fixed inset-y-0 left-0 z-50 w-72 bg-[#dde6ed] border-r border-slate-300/60 flex flex-col transition-transform duration-250 ease-out shadow-2xl',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
-      >
-        {/* Brand */}
-        <div className="p-4 flex items-center justify-between border-b border-slate-200 bg-white/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 flex items-center justify-center shadow-sm text-white">
-              <Coffee className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-0.5">
-                Kafe<span className="text-orange-600">+</span>
-              </h1>
-              <p className="text-[10px] text-slate-500 font-bold truncate max-w-[150px]">
-                {user?.cafe_name || 'Restoran Sistemi'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-2 text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-50 rounded-xl shadow-xs border border-slate-200"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Nav Items */}
-        <nav className="flex-1 px-3 py-3 space-y-1.5 overflow-y-auto custom-scrollbar">
-          <div className="px-3 py-1 text-[10px] font-black tracking-wider text-slate-400 uppercase">Sayfalar</div>
-          {navItems.map(({ icon: Icon, label, href }) => {
-            const active = pathname === href;
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setSidebarOpen(false)}
-                className={clsx(
-                  'flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all',
-                  active
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200 ring-1 ring-orange-400/30'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                )}
-              >
-                <Icon className={clsx('w-4 h-4', active ? 'text-orange-500' : 'text-slate-400')} />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* User Footer */}
-        <div className="p-3 border-t border-slate-200 bg-white/60 space-y-2">
-          <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-black shadow-xs"
-              style={{ background: user?.avatar_color || '#f97316' }}
-            >
-              {initials}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-slate-900 text-xs font-black truncate">{user?.full_name}</p>
-              <p className="text-[10px] font-bold text-slate-500">{user?.role}</p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-              title="Çıkış Yap"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* ─── Top Bar ─── */}
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2 flex-shrink-0 bg-[#dde6ed]">
-        {/* Menu Toggle */}
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-300/80 text-slate-800 px-3 py-2.5 rounded-2xl text-xs font-black shadow-xs transition-all active:scale-95 flex-shrink-0"
-          aria-label="Menü"
-        >
-          <Menu className="w-4 h-4 text-orange-500" />
-          <span className="hidden sm:inline">Menü</span>
-        </button>
-
-        {/* Area Filter - Desktop: buttons, Mobile: dropdown */}
+    <MainLayout>
+      {/* ─── Top Bar (area filter + actions) ─── */}
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+        {/* Area Filter */}
         <div className="flex-1 overflow-hidden">
           {/* Desktop area buttons */}
           <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
             <button
               onClick={() => setSelectedArea(null)}
               className={clsx(
-                'px-3 py-2.5 rounded-2xl font-bold text-xs shadow-xs transition-all active:scale-95 border flex-shrink-0',
+                'px-3 py-2 rounded-xl font-semibold text-xs transition-all active:scale-95 border flex-shrink-0',
                 selectedArea === null
-                  ? 'bg-white text-slate-900 border-slate-300 shadow-sm ring-1 ring-orange-500/20'
-                  : 'bg-white/60 text-slate-600 border-transparent hover:bg-white/80'
+                  ? 'bg-white/15 text-white border-white/20'
+                  : 'bg-white/5 text-[var(--text-2)] border-transparent hover:bg-white/10'
               )}
             >
               Tümü ({tables.length})
@@ -281,10 +154,10 @@ export default function WaiterTableGridPage() {
                   key={area.id}
                   onClick={() => setSelectedArea(area.id)}
                   className={clsx(
-                    'px-3 py-2.5 rounded-2xl font-bold text-xs shadow-xs transition-all active:scale-95 border whitespace-nowrap flex-shrink-0',
+                    'px-3 py-2 rounded-xl font-semibold text-xs transition-all active:scale-95 border whitespace-nowrap flex-shrink-0',
                     selectedArea === area.id
-                      ? 'bg-white text-slate-900 border-slate-300 shadow-sm ring-1 ring-orange-500/20'
-                      : 'bg-white/60 text-slate-600 border-transparent hover:bg-white/80'
+                      ? 'bg-white/15 text-white border-white/20'
+                      : 'bg-white/5 text-[var(--text-2)] border-transparent hover:bg-white/10'
                   )}
                 >
                   {area.name} ({count})
@@ -297,16 +170,16 @@ export default function WaiterTableGridPage() {
           <div className="relative sm:hidden">
             <button
               onClick={() => setAreaDropdownOpen(!areaDropdownOpen)}
-              className="w-full flex items-center justify-between bg-white border border-slate-300/80 px-3 py-2.5 rounded-2xl text-xs font-black text-slate-800 shadow-xs"
+              className="w-full flex items-center justify-between bg-white/10 border border-white/10 px-3 py-2 rounded-xl text-xs font-semibold text-white"
             >
               <span>{selectedAreaName} ({filteredTables.length})</span>
-              <ChevronDown className={clsx('w-3.5 h-3.5 text-slate-400 transition-transform', areaDropdownOpen && 'rotate-180')} />
+              <ChevronDown className={clsx('w-3.5 h-3.5 text-[var(--text-muted)] transition-transform', areaDropdownOpen && 'rotate-180')} />
             </button>
             {areaDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 overflow-hidden">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-xl z-30 overflow-hidden">
                 <button
                   onClick={() => { setSelectedArea(null); setAreaDropdownOpen(false); }}
-                  className={clsx('w-full text-left px-4 py-3 text-xs font-bold transition-colors', selectedArea === null ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50')}
+                  className={clsx('w-full text-left px-4 py-3 text-xs font-semibold transition-colors', selectedArea === null ? 'text-[var(--brand)]' : 'text-[var(--text-2)] hover:bg-white/5')}
                 >
                   Tüm Masalar ({tables.length})
                 </button>
@@ -316,7 +189,7 @@ export default function WaiterTableGridPage() {
                     <button
                       key={area.id}
                       onClick={() => { setSelectedArea(area.id); setAreaDropdownOpen(false); }}
-                      className={clsx('w-full text-left px-4 py-3 text-xs font-bold border-t border-slate-100 transition-colors', selectedArea === area.id ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50')}
+                      className={clsx('w-full text-left px-4 py-3 text-xs font-semibold border-t border-[var(--border)] transition-colors', selectedArea === area.id ? 'text-[var(--brand)]' : 'text-[var(--text-2)] hover:bg-white/5')}
                     >
                       {area.name} ({count})
                     </button>
@@ -329,14 +202,13 @@ export default function WaiterTableGridPage() {
 
         {/* Right side actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Occupied counter */}
-          <div className="bg-white/80 border border-slate-200 px-2.5 py-2 rounded-xl shadow-xs text-center hidden xs:flex flex-col items-center">
-            <span className="text-[10px] font-black text-slate-900 leading-none">{occupiedCount}</span>
-            <span className="text-[8px] font-bold text-slate-400 leading-none mt-0.5">/{tables.length}</span>
+          <div className="bg-white/10 border border-white/10 px-3 py-2 rounded-xl text-center hidden xs:flex flex-col items-center">
+            <span className="text-[11px] font-bold text-white leading-none">{occupiedCount}</span>
+            <span className="text-[9px] font-medium text-[var(--text-muted)] leading-none mt-0.5">/{tables.length}</span>
           </div>
           <button
             onClick={() => setShowAddTableModal(true)}
-            className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold px-3 py-2.5 rounded-2xl shadow-xs text-xs flex items-center gap-1.5 active:scale-95"
+            className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 active:scale-95 shadow-sm"
             title="Masa Ekle"
           >
             <Plus className="w-4 h-4" />
@@ -351,20 +223,20 @@ export default function WaiterTableGridPage() {
       )}
 
       {/* ─── Main Table Grid ─── */}
-      <div className="flex-1 overflow-y-auto px-3 pb-3 custom-scrollbar">
+      <div className="overflow-y-auto custom-scrollbar -mx-1">
         {isLoading ? (
-          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2.5 pt-1">
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2.5 px-1">
             {Array.from({ length: 24 }).map((_, i) => (
-              <div key={i} className="h-20 rounded-2xl bg-white/40 animate-pulse" />
+              <div key={i} className="h-20 rounded-2xl bg-white/10 animate-pulse" />
             ))}
           </div>
         ) : filteredTables.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
+          <div className="flex flex-col items-center justify-center h-64 text-[var(--text-muted)] gap-3">
             <Coffee className="w-12 h-12 opacity-30" />
-            <p className="text-sm font-bold">Bu alanda masa yok</p>
+            <p className="text-sm font-semibold">Bu alanda masa yok</p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2.5 pt-1 content-start">
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2.5 px-1 content-start">
             {filteredTables.map((table) => (
               <TableCard
                 key={table.id}
@@ -443,7 +315,7 @@ export default function WaiterTableGridPage() {
           }}
         />
       )}
-    </div>
+    </MainLayout>
   );
 }
 
@@ -468,49 +340,53 @@ function TableCard({
   return (
     <div
       className={clsx(
-        'rounded-2xl border flex flex-col shadow-sm transition-all relative overflow-hidden',
+        'rounded-2xl border flex flex-col shadow-sm transition-all relative overflow-hidden self-start',
         isOccupied
-          ? 'bg-[#38bdf8] border-[#0284c7]/30 shadow-sky-200'
-          : 'bg-white border-slate-200'
+          ? 'border-transparent'
+          : 'border-transparent'
       )}
+      style={{
+        background: isOccupied ? 'var(--card-hover)' : 'var(--card)',
+        borderColor: isOccupied ? 'var(--sky)' : 'var(--border)',
+        height: '88px',
+        boxShadow: isOccupied ? `inset 0 0 0 1.5px var(--sky)` : undefined,
+      }}
     >
+      {/* Status dot */}
+      <span
+        className="absolute top-2 right-2 w-2 h-2 rounded-full"
+        style={{ background: isOccupied ? 'var(--sky)' : 'var(--text-muted)' }}
+      />
+
       {/* Main clickable area */}
       <button
         onClick={onClick}
-        className="flex-1 flex flex-col items-center justify-center py-3 px-1.5 active:opacity-80 min-h-[56px]"
+        className="flex-1 flex flex-col items-center justify-center py-2 px-1.5 active:opacity-80"
       >
         <span
-          className={clsx(
-            'font-black text-sm sm:text-base leading-none',
-            isOccupied ? 'text-white' : 'text-slate-800'
-          )}
+          className="font-black text-sm sm:text-base leading-none"
+          style={{ color: 'var(--text)' }}
         >
           {table.name}
         </span>
 
-        {/* Elapsed time */}
-        {isOccupied && elapsed && (
-          <span className="text-[9px] font-bold text-white/80 mt-0.5 flex items-center gap-0.5">
-            <Clock className="w-2 h-2" />
-            {elapsed}
-          </span>
-        )}
-
-        {/* Amount */}
         {isOccupied && (
-          <span className="text-[10px] font-bold text-white/90 mt-0.5">
-            ₺{Math.round(amount)}
-          </span>
+          <>
+            {elapsed && (
+              <span className="text-[9px] font-bold mt-0.5 flex items-center gap-0.5" style={{ color: 'var(--text-muted)' }}>
+                <Clock className="w-2 h-2" />
+                {elapsed}
+              </span>
+            )}
+            <span className="text-[10px] font-black mt-0.5" style={{ color: 'var(--brand)' }}>
+              ₺{Math.round(amount)}
+            </span>
+          </>
         )}
       </button>
 
       {/* Quick Action Row */}
-      <div
-        className={clsx(
-          'flex border-t',
-          isOccupied ? 'border-white/20' : 'border-slate-100'
-        )}
-      >
+      <div style={{ borderTop: '1px solid var(--border)' }}>
         {isOccupied ? (
           hasItems ? (
             <button
@@ -520,7 +396,8 @@ function TableCard({
                   router.push(`/cashier/session/${table.current_session_id}`);
                 }
               }}
-              className="flex-1 py-1.5 text-[9px] font-black text-white/95 hover:bg-white/15 active:bg-white/25 flex items-center justify-center gap-0.5 transition-colors"
+              className="w-full py-1.5 text-[9px] font-black hover:bg-white/10 active:bg-white/20 flex items-center justify-center gap-0.5 transition-colors"
+              style={{ color: 'var(--text)' }}
               title="Ödeme Ekranına Git"
             >
               <CreditCard className="w-2.5 h-2.5" />
@@ -529,7 +406,8 @@ function TableCard({
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onQuickClose(); }}
-              className="flex-1 py-1.5 text-[9px] font-black text-white/90 hover:bg-white/15 active:bg-white/25 flex items-center justify-center gap-0.5 transition-colors"
+              className="w-full py-1.5 text-[9px] font-black hover:bg-white/10 active:bg-white/20 flex items-center justify-center gap-0.5 transition-colors"
+              style={{ color: 'var(--text-2)' }}
               title="Boş Masayı Kapat"
             >
               <X className="w-2.5 h-2.5" />
@@ -539,7 +417,8 @@ function TableCard({
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); onQuickOpen(); }}
-            className="flex-1 py-1.5 text-[9px] font-black text-slate-600 hover:bg-orange-50 hover:text-orange-600 active:bg-orange-100 flex items-center justify-center gap-0.5 transition-colors"
+            className="w-full py-1.5 text-[9px] font-black hover:bg-white/10 active:bg-white/20 flex items-center justify-center gap-0.5 transition-colors"
+            style={{ color: 'var(--brand)' }}
             title="Masayı Aç"
           >
             <Play className="w-2.5 h-2.5" />
@@ -579,44 +458,41 @@ function TableControlModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-[2px]">
-      <div className="bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-sm shadow-2xl border border-slate-200 animate-slide-up">
+      <div className="rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-sm shadow-2xl animate-slide-up" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+        <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2.5">
             <div
-              className={clsx(
-                'w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-xs',
-                isOccupied ? 'bg-[#38bdf8]' : 'bg-slate-700'
-              )}
+              className="w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-xs"
+              style={{ background: isOccupied ? 'var(--sky)' : 'var(--card-hover)' }}
             >
               {table.name}
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-900">{table.name} Masası</h2>
-              <p className="text-xs text-slate-500 font-semibold">{table.area_name}</p>
+              <h2 className="text-sm font-black" style={{ color: 'var(--text)' }}>{table.name} Masası</h2>
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>{table.area_name}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400">
+          <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-white/10 transition-colors" style={{ color: 'var(--text-2)' }}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Status */}
         <div
-          className={clsx(
-            'p-3.5 rounded-2xl border mb-4 flex items-center justify-between',
-            isOccupied
-              ? 'bg-sky-50 border-sky-200 text-sky-900'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          )}
+          className="p-3.5 rounded-2xl border mb-4 flex items-center justify-between"
+          style={{
+            background: isOccupied ? 'rgba(62,166,255,0.08)' : 'rgba(74,222,128,0.08)',
+            borderColor: isOccupied ? 'rgba(62,166,255,0.25)' : 'rgba(74,222,128,0.25)',
+          }}
         >
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider block opacity-70">Durum</span>
-            <span className="text-sm font-black mt-0.5 flex items-center gap-1">
-              {isOccupied ? '● Dolu' : '○ Boş'}
+            <span className="text-[11px] font-bold uppercase tracking-wider block opacity-70" style={{ color: 'var(--text-2)' }}>Durum</span>
+            <span className="text-sm font-black mt-0.5 flex items-center gap-1" style={{ color: 'var(--text)' }}>
+              {isOccupied ? '● Dolu' : '○ Bos'}
             </span>
             {isOccupied && elapsed && (
-              <span className="text-xs font-bold text-sky-600 flex items-center gap-1 mt-0.5">
+              <span className="text-xs font-bold flex items-center gap-1 mt-0.5" style={{ color: 'var(--sky)' }}>
                 <Clock className="w-3 h-3" />
                 {elapsed} açık
               </span>
@@ -624,8 +500,8 @@ function TableControlModal({
           </div>
           {isOccupied && (
             <div className="text-right">
-              <span className="text-[10px] font-bold text-sky-700 block uppercase">Tutar</span>
-              <span className="text-xl font-black text-sky-900">₺{amount.toFixed(0)}</span>
+              <span className="text-[10px] font-bold block uppercase" style={{ color: 'var(--sky)' }}>Tutar</span>
+              <span className="text-xl font-black" style={{ color: 'var(--text)' }}>₺{amount.toFixed(0)}</span>
             </div>
           )}
         </div>
@@ -634,7 +510,7 @@ function TableControlModal({
         {!isOccupied && (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2">Kişi Sayısı</label>
+              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--text-2)' }}>Kisi Sayısı</label>
               <div className="grid grid-cols-4 gap-1.5">
                 {[1, 2, 3, 4, 5, 6, 8, 10].map((num) => (
                   <button
@@ -643,9 +519,12 @@ function TableControlModal({
                     className={clsx(
                       'py-2.5 rounded-xl text-xs font-black transition-all active:scale-95 border',
                       guestCount === num
-                        ? 'bg-orange-500 text-white border-orange-600'
-                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                        ? 'text-white'
+                        : 'hover:bg-white/10'
                     )}
+                    style={guestCount === num
+                      ? { background: 'var(--brand)', borderColor: 'var(--brand)' }
+                      : { background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text-2)' }}
                   >
                     {num}k
                   </button>
@@ -657,7 +536,8 @@ function TableControlModal({
               <button
                 onClick={() => onStartOnly(guestCount)}
                 disabled={isPending}
-                className="bg-slate-700 hover:bg-slate-800 text-white font-bold py-3.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-98 disabled:opacity-50"
+                className="text-white font-bold py-3.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-98 disabled:opacity-50"
+                style={{ background: 'var(--card-hover)' }}
               >
                 <Play className="w-3.5 h-3.5 fill-white" />
                 Sadece Aç
@@ -665,7 +545,8 @@ function TableControlModal({
               <button
                 onClick={() => onStart(guestCount)}
                 disabled={isPending}
-                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold py-3.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 disabled:opacity-50"
+                className="text-white font-bold py-3.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 disabled:opacity-50"
+                style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
               >
                 <Play className="w-3.5 h-3.5 fill-white" />
                 Aç &amp; Sipariş
@@ -679,7 +560,8 @@ function TableControlModal({
           <div className="space-y-2.5">
             <button
               onClick={onGoToSession}
-              className="w-full bg-[#38bdf8] hover:bg-[#0284c7] text-white font-bold py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 active:scale-98 transition-colors"
+              className="w-full text-white font-bold py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 active:scale-98 transition-colors"
+              style={{ background: 'var(--sky-d)' }}
             >
               <Coffee className="w-4 h-4" />
               Sipariş Ekranına Git
@@ -687,18 +569,19 @@ function TableControlModal({
 
             <button
               onClick={onGoToPayment}
-              className="w-full bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-xs active:scale-98 transition-colors"
+              className="w-full font-bold py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-xs active:scale-98 transition-colors"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
-              <CreditCard className="w-4 h-4 text-orange-500" />
+              <CreditCard className="w-4 h-4" style={{ color: 'var(--brand)' }} />
               Hesap Al / Ödeme Ekranı
             </button>
 
             {hasItems ? (
-              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs font-semibold text-center">
+              <div className="p-3 rounded-2xl border text-xs font-semibold text-center" style={{ background: 'rgba(245,158,11,0.10)', borderColor: 'rgba(245,158,11,0.30)', color: 'var(--brand)' }}>
                 Masada ₺{amount.toFixed(0)} tutarında ürün bulunuyor. Masayı kapatmak için önce ödeme alınız.
               </div>
             ) : (
-              <div className="pt-1 border-t border-slate-100">
+              <div className="pt-1" style={{ borderTop: '1px solid var(--border)' }}>
                 <button
                   onClick={() => {
                     if (confirm(`${table.name} masasını kapatmak istediğinize emin misiniz?`)) {
@@ -706,10 +589,11 @@ function TableControlModal({
                     }
                   }}
                   disabled={isPending}
-                  className="w-full bg-red-50 hover:bg-red-100 text-red-700 font-bold py-2.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 border border-red-200 active:scale-98 disabled:opacity-50"
+                  className="w-full font-bold py-2.5 rounded-2xl text-xs flex items-center justify-center gap-1.5 border active:scale-98 disabled:opacity-50"
+                  style={{ background: 'rgba(248,113,113,0.10)', borderColor: 'rgba(248,113,113,0.30)', color: 'var(--danger)' }}
                 >
                   <X className="w-4 h-4" />
-                  Boş Masayı Kapat &amp; Bırak
+                  Bos Masayı Kapat &amp; Bırak
                 </button>
               </div>
             )}
@@ -795,36 +679,37 @@ function AddTableModal({
     return list;
   }, [mode, prefix, startNum, count]);
 
-  const inputClass =
-    'w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-2.5 text-slate-800 text-sm font-semibold placeholder-slate-400 focus:outline-none focus:border-orange-500';
+  const inputClassDark =
+    'w-full border rounded-2xl px-4 py-2.5 text-sm font-semibold focus:outline-none focus:border-orange-500 transition-colors';
 
   const isPending = createMutation.isPending || bulkCreateMutation.isPending;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-[2px] p-2 sm:p-4">
-      <div className="bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl border border-slate-200 animate-slide-up">
+      <div className="rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl animate-slide-up" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <Plus className="w-4 h-4 text-orange-500" />
+        <div className="flex items-center justify-between mb-3 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--text)' }}>
+            <Plus className="w-4 h-4" style={{ color: 'var(--brand)' }} />
             <span>Masa Ekle</span>
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400">
+          <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-white/10 transition-colors" style={{ color: 'var(--text-2)' }}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Mode Selector (Tekli / Toplu) */}
-        <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-2xl mb-4 text-xs font-bold">
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl mb-4 text-xs font-bold" style={{ background: 'var(--app)' }}>
           <button
             type="button"
             onClick={() => setMode('single')}
             className={clsx(
               'py-2 rounded-xl transition-all flex items-center justify-center gap-1.5',
-              mode === 'single'
-                ? 'bg-white text-slate-900 shadow-xs font-black'
-                : 'text-slate-500 hover:text-slate-800'
+              mode === 'single' ? 'shadow-xs font-black' : 'hover:bg-white/5'
             )}
+            style={mode === 'single'
+              ? { background: 'var(--card)', color: 'var(--text)' }
+              : { color: 'var(--text-2)' }}
           >
             <Hash className="w-3.5 h-3.5" />
             <span>Tekli Masa</span>
@@ -834,10 +719,11 @@ function AddTableModal({
             onClick={() => setMode('bulk')}
             className={clsx(
               'py-2 rounded-xl transition-all flex items-center justify-center gap-1.5',
-              mode === 'bulk'
-                ? 'bg-white text-orange-600 shadow-xs font-black'
-                : 'text-slate-500 hover:text-slate-800'
+              mode === 'bulk' ? 'shadow-xs font-black' : 'hover:bg-white/5'
             )}
+            style={mode === 'bulk'
+              ? { background: 'var(--card)', color: 'var(--brand)' }
+              : { color: 'var(--text-2)' }}
           >
             <Layers className="w-3.5 h-3.5" />
             <span>Toplu Masa Ekle</span>
@@ -849,12 +735,13 @@ function AddTableModal({
           {mode === 'single' && (
             <>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Masa Adı / Kodu *</label>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text-2)' }}>Masa Adı / Kodu *</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Örn: B43, Teras 5, VIP 2"
-                  className={inputClass}
+                  className={inputClassDark}
+                  style={inputStyle}
                   autoFocus
                   required
                 />
@@ -867,35 +754,38 @@ function AddTableModal({
             <div className="space-y-3">
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Ön Ek (Harf/Kod)</label>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--text-2)' }}>Ön Ek (Harf/Kod)</label>
                   <input
                     value={prefix}
                     onChange={(e) => setPrefix(e.target.value)}
                     placeholder="M, A, B-"
-                    className={inputClass}
+                    className={inputClassDark}
+                    style={inputStyle}
                     autoFocus
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Başlangıç No</label>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--text-2)' }}>Baslangıç No</label>
                   <input
                     type="number"
                     min="1"
                     value={startNum}
                     onChange={(e) => setStartNum(Math.max(1, parseInt(e.target.value) || 1))}
-                    className={inputClass}
+                    className={inputClassDark}
+                    style={inputStyle}
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Adet</label>
+                  <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--text-2)' }}>Adet</label>
                   <input
                     type="number"
                     min="1"
                     max="100"
                     value={count}
                     onChange={(e) => setCount(Math.min(100, Math.max(1, parseInt(e.target.value) || 1)))}
-                    className={inputClass}
+                    className={inputClassDark}
+                    style={inputStyle}
                     required
                   />
                 </div>
@@ -903,7 +793,7 @@ function AddTableModal({
 
               {/* Quick Count Add Pills */}
               <div className="flex items-center gap-1.5 pt-0.5">
-                <span className="text-[11px] font-semibold text-slate-400">Hızlı Seçim:</span>
+                <span className="text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}>Hızlı Secim:</span>
                 {[5, 10, 15, 20].map((n) => (
                   <button
                     key={n}
@@ -911,10 +801,11 @@ function AddTableModal({
                     onClick={() => setCount(n)}
                     className={clsx(
                       'px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all',
-                      count === n
-                        ? 'bg-orange-50 text-orange-700 border-orange-300 shadow-2xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      count === n ? 'shadow-2xs' : 'hover:bg-white/10'
                     )}
+                    style={count === n
+                      ? { background: 'rgba(255,102,0,0.12)', color: 'var(--brand)', borderColor: 'rgba(255,102,0,0.35)' }
+                      : { background: 'var(--card)', color: 'var(--text-2)', borderColor: 'var(--border)' }}
                   >
                     {n} Masa
                   </button>
@@ -922,22 +813,23 @@ function AddTableModal({
               </div>
 
               {/* Live Preview of generated names */}
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                  <span>Oluşturulacak Masalar</span>
-                  <span className="text-orange-600 font-black">{previewNames.length} Adet</span>
+              <div className="p-3 rounded-2xl border space-y-1.5" style={{ background: 'var(--app)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center justify-between text-[11px] font-bold" style={{ color: 'var(--text-2)' }}>
+                  <span>Olusturulacak Masalar</span>
+                  <span className="font-black" style={{ color: 'var(--brand)' }}>{previewNames.length} Adet</span>
                 </div>
                 <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto custom-scrollbar pt-0.5">
                   {previewNames.slice(0, 18).map((pName, idx) => (
                     <span
                       key={idx}
-                      className="px-2 py-0.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-[10px] font-mono font-bold shadow-2xs"
+                      className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border"
+                      style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
                     >
                       {pName}
                     </span>
                   ))}
                   {previewNames.length > 18 && (
-                    <span className="px-2 py-0.5 text-slate-400 text-[10px] font-bold">
+                    <span className="px-2 py-0.5 text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>
                       +{previewNames.length - 18} daha...
                     </span>
                   )}
@@ -949,11 +841,12 @@ function AddTableModal({
           {/* Common fields: Area & Capacity */}
           <div className="grid grid-cols-2 gap-2.5 pt-1">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Bulunduğu Alan *</label>
+              <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text-2)' }}>Bulunduğu Alan *</label>
               <select
                 value={areaId}
                 onChange={(e) => setAreaId(e.target.value)}
-                className={inputClass + ' cursor-pointer'}
+                className={inputClassDark + ' cursor-pointer'}
+                style={inputStyle}
                 required
               >
                 {areas.map((a) => (
@@ -962,14 +855,15 @@ function AddTableModal({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Kapasite (Kişi)</label>
+              <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text-2)' }}>Kapasite (Kisi)</label>
               <input
                 type="number"
                 min="1"
                 max="50"
                 value={capacity}
                 onChange={(e) => setCapacity(e.target.value)}
-                className={inputClass}
+                className={inputClassDark}
+                style={inputStyle}
               />
             </div>
           </div>
@@ -979,16 +873,18 @@ function AddTableModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-2xl text-xs"
+              className="flex-1 font-bold py-3 rounded-2xl text-xs hover:bg-white/10 transition-colors"
+              style={{ background: 'var(--app)', color: 'var(--text-2)' }}
             >
               İptal
             </button>
             <button
               type="submit"
               disabled={isPending}
-              className="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold py-3 rounded-2xl text-xs shadow-md disabled:opacity-50 transition-all active:scale-98"
+              className="flex-1 text-white font-bold py-3 rounded-2xl text-xs shadow-md disabled:opacity-50 transition-all active:scale-98"
+              style={{ background: 'linear-gradient(90deg, var(--brand), #ff9500)' }}
             >
-              {isPending ? 'Ekleniyor...' : mode === 'bulk' ? `${count} Masayı Oluştur` : 'Masa Ekle'}
+              {isPending ? 'Ekleniyor...' : mode === 'bulk' ? `${count} Masayı Olustur` : 'Masa Ekle'}
             </button>
           </div>
         </form>

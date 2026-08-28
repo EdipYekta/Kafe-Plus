@@ -51,7 +51,7 @@ router.post('/', authenticate, requireRole('SuperAdmin', 'Admin'), async (req, r
 });
 
 // PATCH /api/cafes/:id (Update cafe)
-router.patch('/:id', authenticate, requireRole('SuperAdmin', 'Admin', 'Manager'), async (req, res) => {
+router.patch('/:id', authenticate, requireRole('SuperAdmin', 'Owner', 'Admin', 'Manager'), async (req, res) => {
   try {
     const { name, phone, address, logo_url, timezone, currency, kitchen_enabled, is_active } = req.body;
     const { rows } = await db.query(`

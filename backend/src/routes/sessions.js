@@ -3,6 +3,13 @@ const db = require('../db');
 const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
+// Helper: check if user can take payment / manage financial operations
+function canManageFinance(req) {
+  const r = req.user.role_name;
+  const perms = req.user.permissions || {};
+  return r === 'SuperAdmin' || r === 'Owner' || r === 'Admin' || r === 'Manager' || !!perms.can_take_payment;
+}
+
 // POST /api/sessions - Open session
 router.post('/', authenticate, async (req, res) => {
   const client = await db.getClient();
@@ -66,11 +73,8 @@ router.get('/:id', authenticate, async (req, res) => {
           FROM payments p
           WHERE p.session_id = s.id
         ), 0) as paid_amount,
-        COALESCE((
-          SELECT SUM(p.discount_amount)
-          FROM payments p
-          WHERE p.session_id = s.id
-        ), 0) as total_discount,
+        COALESCE(s.discount_amount, 0) as total_discount,
+        s.discount_reason,
         COALESCE((
           SELECT COUNT(DISTINCT o.id)
           FROM orders o
@@ -80,8 +84,8 @@ router.get('/:id', authenticate, async (req, res) => {
       JOIN tables t ON s.table_id = t.id
       LEFT JOIN areas a ON t.area_id = a.id
       JOIN users u ON s.user_id = u.id
-      WHERE s.id = $1 AND s.cafe_id = $2
-    `, [req.params.id, req.user.cafe_id]);
+      WHERE s.id = $1 AND (s.cafe_id = $2 OR $3 = 'SuperAdmin')
+    `, [req.params.id, req.user.cafe_id, req.user.role_name]);
     
     if (!session) return res.status(404).json({ error: 'Oturum bulunamadı' });
     res.json(session);
@@ -90,8 +94,11 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/sessions/:id/close - Close session
+// POST /api/sessions/:id/close - Close session (requires payment permission)
 router.post('/:id/close', authenticate, async (req, res) => {
+  if (!canManageFinance(req)) {
+    return res.status(403).json({ error: 'Masa kapatma yetkiniz yok. Ödeme yetkisi gereklidir.' });
+  }
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
@@ -161,6 +168,46 @@ router.post('/:id/cancel', authenticate, async (req, res) => {
     }
 
     res.json({ success: true, table_id: session.table_id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/sessions/:id/discount - Apply / update session-level discount (requires payment permission)
+router.patch('/:id/discount', authenticate, async (req, res) => {
+  if (!canManageFinance(req)) {
+    return res.status(403).json({ error: 'İndirim uygulama yetkiniz yok. Ödeme yetkisi gereklidir.' });
+  }
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const { discount_amount, discount_reason } = req.body;
+    const amt = parseFloat(discount_amount) || 0;
+    if (amt < 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Geçersiz indirim tutarı' });
+    }
+
+    const cafeFilter = req.user.role_name === 'SuperAdmin' ? '' : `AND cafe_id=${req.user.cafe_id}`;
+    const { rows: [session] } = await client.query(
+      `SELECT * FROM sessions WHERE id=$1 ${cafeFilter} AND is_active=true`,
+      [req.params.id]
+    );
+    if (!session) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Aktif oturum bulunamadı' });
+    }
+
+    const { rows: [updated] } = await client.query(
+      `UPDATE sessions SET discount_amount=$1, discount_reason=$2 WHERE id=$3 RETURNING *`,
+      [amt, discount_reason || null, req.params.id]
+    );
+
+    await client.query('COMMIT');
+    res.json(updated);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

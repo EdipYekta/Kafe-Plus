@@ -2,14 +2,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import { ChefHat, Clock, CheckCircle2, Flame, ArrowRight, X, Sparkles } from 'lucide-react';
+import { ChefHat, Clock, CheckCircle2, Flame, X, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { useRouter } from 'next/navigation';
+import MainLayout from '@/components/layout/MainLayout';
 
 export default function KitchenKDSPage() {
-  const router = useRouter();
   const { user } = useAuthStore();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<string | null>(null);
@@ -29,7 +28,7 @@ export default function KitchenKDSPage() {
         const { event } = JSON.parse(e.data || '{}');
         if (event === 'new_order') {
           qc.invalidateQueries({ queryKey: ['kitchen-orders'] });
-          toast('🔔 Yeni sipariş geldi!', { icon: '👨‍🍳' });
+          toast('Yeni siparis geldi', { icon: '👤' });
         }
       };
       return () => ws.close();
@@ -51,48 +50,30 @@ export default function KitchenKDSPage() {
     : orders;
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#dde6ed] text-slate-800 flex flex-col font-sans select-none p-3 sm:p-5">
-      
-      {/* Top Header */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0 gap-3">
-        <div className="flex items-center gap-3">
-          <div className="bg-[#8faebe] text-white font-black text-xl px-5 py-2 rounded-2xl shadow-sm tracking-wide flex items-center gap-2">
-            <ChefHat className="w-5 h-5" />
-            <span>Mutfak Ekranı (KDS)</span>
-          </div>
-
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 bg-white/70 p-1 rounded-2xl border border-slate-300">
-            {[
-              { key: null, label: 'Tümü' },
-              { key: 'pending', label: 'Bekleyen' },
-              { key: 'preparing', label: 'Hazırlanıyor' },
-              { key: 'ready', label: 'Hazır' },
-            ].map((f) => (
-              <button
-                key={String(f.key)}
-                onClick={() => setFilter(f.key)}
-                className={clsx(
-                  'px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all active:scale-95',
-                  filter === f.key
-                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
-                    : 'text-slate-600 hover:text-slate-900'
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+    <MainLayout>
+      {/* Filter Pills */}
+      <div className="flex items-center gap-2 mb-4 flex-shrink-0">
+        <div className="flex items-center gap-1 p-1 rounded-xl border border-white/10" style={{ background: 'var(--card)' }}>
+          {[
+            { key: null, label: 'Tümü' },
+            { key: 'pending', label: 'Bekleyen' },
+            { key: 'preparing', label: 'Hazırlanıyor' },
+            { key: 'ready', label: 'Hazır' },
+          ].map((f) => (
+            <button
+              key={String(f.key)}
+              onClick={() => setFilter(f.key)}
+              className={clsx(
+                'px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all active:scale-95',
+                filter === f.key
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
-
-        {/* Close Button back to Waiter / POS */}
-        <button
-          onClick={() => router.push('/waiter')}
-          className="bg-white/80 hover:bg-white text-slate-600 hover:text-slate-900 w-11 h-11 rounded-2xl shadow-sm flex items-center justify-center transition-all active:scale-95 border border-slate-300/60"
-          title="Çıkış"
-        >
-          <X className="w-6 h-6" />
-        </button>
       </div>
 
       {/* Main Order Tickets Grid */}
@@ -100,7 +81,7 @@ export default function KitchenKDSPage() {
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-64 rounded-3xl bg-white/40 animate-pulse" />
+              <div key={i} className="h-64 rounded-3xl bg-white/5 animate-pulse" />
             ))}
           </div>
         ) : (
@@ -115,27 +96,28 @@ export default function KitchenKDSPage() {
                 <div
                   key={order.id}
                   className={clsx(
-                    'bg-white rounded-3xl p-4 shadow-xs border flex flex-col justify-between h-72 transition-all',
-                    isPending ? 'border-amber-300 ring-2 ring-amber-300/20' :
-                    isPreparing ? 'border-sky-300 ring-2 ring-sky-300/20' :
-                    'border-emerald-300'
+                    'rounded-3xl p-4 border flex flex-col justify-between h-72 transition-all',
+                    isPending ? 'border-amber-500/50 bg-amber-500/5 ring-1 ring-amber-500/20' :
+                    isPreparing ? 'border-sky-500/50 bg-sky-500/5 ring-1 ring-sky-500/20' :
+                    'border-emerald-500/50 bg-emerald-500/5'
                   )}
+                  style={{ background: 'var(--card)' }}
                 >
                   {/* Ticket Header */}
                   <div>
-                    <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                    <div className="flex items-center justify-between mb-2 pb-2 border-b border-white/10">
                       <div>
-                        <span className="text-lg font-black text-slate-900">{order.table_name}</span>
+                        <span className="text-lg font-black text-white">{order.table_name}</span>
                         <span className="text-[10px] text-slate-400 block font-bold">#{order.id} · {order.area_name}</span>
                       </div>
                       <div className="text-right">
                         <span className={clsx(
                           'text-xs font-mono font-bold px-2 py-0.5 rounded-lg inline-block',
-                          minutes > 15 ? 'bg-red-100 text-red-700' :
-                          minutes > 8 ? 'bg-amber-100 text-amber-700' :
-                          'bg-slate-100 text-slate-700'
+                          minutes > 15 ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                          minutes > 8 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                          'bg-white/10 text-slate-300'
                         )}>
-                          ⏱ {minutes} dk
+                          {minutes} dk
                         </span>
                         <span className="text-[10px] text-slate-400 block font-medium mt-0.5">{order.waiter_name}</span>
                       </div>
@@ -146,10 +128,10 @@ export default function KitchenKDSPage() {
                       {order.items?.map((item: any, idx: number) => (
                         <div key={idx} className="flex items-start justify-between text-xs py-0.5">
                           <div className="min-w-0 flex-1">
-                            <span className="font-black text-slate-900 mr-1.5">{item.quantity}×</span>
-                            <span className="font-bold text-slate-800">{item.product_name}</span>
+                            <span className="font-black text-orange-400 mr-1.5">{item.quantity}×</span>
+                            <span className="font-bold text-white">{item.product_name}</span>
                             {item.note && (
-                              <p className="text-[10px] text-amber-700 italic font-semibold">Not: {item.note}</p>
+                              <p className="text-[10px] text-amber-400 italic font-semibold">Not: {item.note}</p>
                             )}
                           </div>
                         </div>
@@ -157,18 +139,18 @@ export default function KitchenKDSPage() {
                     </div>
 
                     {order.kitchen_note && (
-                      <div className="mt-2 p-1.5 bg-amber-50 rounded-xl border border-amber-200 text-[10px] text-amber-800 font-semibold">
-                        📌 {order.kitchen_note}
+                      <div className="mt-2 p-1.5 bg-amber-500/10 rounded-xl border border-amber-500/20 text-[10px] text-amber-300 font-semibold">
+                        Not: {order.kitchen_note}
                       </div>
                     )}
                   </div>
 
                   {/* Status Action Button */}
-                  <div className="pt-2 border-t border-slate-100">
+                  <div className="pt-2 border-t border-white/10">
                     {isPending && (
                       <button
                         onClick={() => updateStatus.mutate({ id: order.id, status: 'preparing' })}
-                        className="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold py-2.5 rounded-2xl text-xs shadow-xs transition-all flex items-center justify-center gap-1.5"
+                        className="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1.5"
                       >
                         <Flame className="w-4 h-4" />
                         <span>Hazırlamaya Başla</span>
@@ -177,7 +159,7 @@ export default function KitchenKDSPage() {
                     {isPreparing && (
                       <button
                         onClick={() => updateStatus.mutate({ id: order.id, status: 'ready' })}
-                        className="w-full bg-sky-500 hover:bg-sky-600 active:scale-95 text-white font-bold py-2.5 rounded-2xl text-xs shadow-xs transition-all flex items-center justify-center gap-1.5"
+                        className="w-full bg-sky-500 hover:bg-sky-600 active:scale-95 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         <span>Hazır Olarak İşaretle</span>
@@ -186,7 +168,7 @@ export default function KitchenKDSPage() {
                     {isReady && (
                       <button
                         onClick={() => updateStatus.mutate({ id: order.id, status: 'delivered' })}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2.5 rounded-2xl text-xs shadow-xs transition-all flex items-center justify-center gap-1.5"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         <span>Teslim Edildi (Kapat)</span>
@@ -198,16 +180,15 @@ export default function KitchenKDSPage() {
             })}
 
             {filteredOrders.length === 0 && (
-              <div className="col-span-4 bg-white rounded-3xl p-12 text-center border border-slate-200 text-slate-400 mt-6">
-                <ChefHat className="w-12 h-12 mx-auto mb-2 opacity-40 text-slate-600" />
-                <p className="font-bold text-sm text-slate-800">Bekleyen mutfak siparişi yok</p>
-                <p className="text-xs text-slate-400 mt-0.5">Garsonlar sipariş aldıkça burada görüntülenecektir</p>
+              <div className="col-span-4 rounded-3xl p-12 text-center border border-white/10 text-slate-400 mt-6" style={{ background: 'var(--card)' }}>
+                <ChefHat className="w-12 h-12 mx-auto mb-2 opacity-30 text-slate-400" />
+                <p className="font-bold text-sm text-white">Bekleyen mutfak siparişi yok</p>
+                <p className="text-xs text-slate-500 mt-0.5">Garsonlar sipariş aldıkça burada görüntülenecektir</p>
               </div>
             )}
           </div>
         )}
       </div>
-
-    </div>
+    </MainLayout>
   );
 }

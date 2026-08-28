@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { WebSocketServer } = require('ws');
 const http = require('http');
+const { backfillAll } = require('./summary');
 
 const app = express();
 const server = http.createServer(app);
@@ -79,3 +80,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Kafe+ Backend running on port ${PORT}`));
+
+// Backfill daily sales summaries from existing payments so metrics stay consistent.
+backfillAll();

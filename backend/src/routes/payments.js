@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { authenticate } = require('../middleware/auth');
+const { addDaily, removeDaily, getMetrics } = require('../summary');
 const router = express.Router();
 
 // POST /api/payments
@@ -8,10 +9,51 @@ router.post('/', authenticate, async (req, res) => {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
-    const { session_id, amount, payment_type, discount_amount, discount_reason, notes } = req.body;
 
-    const numAmount = parseFloat(amount) || 0;
+    const perms = req.user.permissions || {};
+    if (req.user.role_name !== 'SuperAdmin' && req.user.role_name !== 'Owner' &&
+        req.user.role_name !== 'Admin' && req.user.role_name !== 'Manager' && !perms.can_take_payment) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Ödeme alma yetkiniz yok' });
+    }
+
+    const { session_id, amount, payment_type, discount_amount, discount_reason, notes, items } = req.body;
+
+    // If per-item quantities are provided (partial/unit-based payment), validate & sum them.
+    let numAmount = parseFloat(amount) || 0;
     const numDiscount = parseFloat(discount_amount) || 0;
+    let paidItems = [];
+
+    if (Array.isArray(items) && items.length > 0) {
+      let computed = 0;
+      for (const it of items) {
+        const orderItemId = parseInt(it.order_item_id);
+        const qty = parseInt(it.quantity);
+        if (!orderItemId || !qty || qty < 1) {
+
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Geçersiz ödeme kalemi' });
+        }
+        const { rows: [oi] } = await client.query(
+          `SELECT oi.id, oi.quantity, oi.paid_quantity, oi.unit_price, o.id as order_id, o.session_id
+           FROM order_items oi JOIN orders o ON oi.order_id = o.id
+           WHERE oi.id = $1 AND o.cafe_id = $2 AND o.session_id = $3 AND oi.status != 'cancelled'`,
+          [orderItemId, req.user.cafe_id, session_id]
+        );
+        if (!oi) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Sipariş kalemi bulunamadı' });
+        }
+        const remainingUnits = oi.quantity - (oi.paid_quantity || 0);
+        if (qty > remainingUnits) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `"${orderItemId}" için yalnızca ${remainingUnits} adet ödenecek durumda` });
+        }
+        computed += qty * Number(oi.unit_price);
+        paidItems.push({ order_item_id: orderItemId, quantity: qty });
+      }
+      numAmount = numAmount || computed;
+    }
 
     if (numAmount <= 0 && numDiscount <= 0) {
       await client.query('ROLLBACK');
@@ -19,9 +61,27 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     const { rows: [payment] } = await client.query(`
-      INSERT INTO payments (session_id, cafe_id, user_id, amount, payment_type, discount_amount, discount_reason, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-    `, [session_id, req.user.cafe_id, req.user.id, numAmount, payment_type || 'cash', numDiscount, discount_reason || null, notes || null]);
+      INSERT INTO payments (session_id, cafe_id, user_id, amount, payment_type, discount_amount, discount_reason, notes, items)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+    `, [session_id, req.user.cafe_id, req.user.id, numAmount, payment_type || 'cash', numDiscount, discount_reason || null, notes || null, JSON.stringify(paidItems)]);
+
+    // Mark paid units on each order item.
+    for (const pi of paidItems) {
+      await client.query(
+        'UPDATE order_items SET paid_quantity = paid_quantity + $1 WHERE id = $2',
+        [pi.quantity, pi.order_item_id]
+      );
+    }
+
+    // Update daily sales summary (denormalized metrics) within the same transaction.
+    const payDate = payment.created_at ? new Date(payment.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    await addDaily(client, {
+      cafeId: req.user.cafe_id,
+      date: payDate,
+      amount: numAmount,
+      payment_type: payment_type || 'cash',
+      discount: numDiscount,
+    });
 
     await client.query('COMMIT');
 
@@ -66,7 +126,6 @@ router.delete('/:id', authenticate, async (req, res) => {
     const paymentId = req.params.id;
     const cafeId = req.user.cafe_id;
 
-    // Check payment & session status
     const { rows: [payment] } = await client.query(`
       SELECT p.*, s.is_active as session_active, s.table_id
       FROM payments p
@@ -84,7 +143,28 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Masa kapatıldığı için bu ödeme artık geri alınamaz' });
     }
 
-    // Delete payment
+    // Revert daily sales summary before deleting.
+    const payDate = payment.created_at ? new Date(payment.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    await removeDaily(client, {
+      cafeId,
+      date: payDate,
+      amount: Number(payment.amount) || 0,
+      payment_type: payment.payment_type,
+      discount: Number(payment.discount_amount) || 0,
+    });
+
+    // Return paid units to their order items.
+    if (Array.isArray(payment.items)) {
+      for (const pi of payment.items) {
+        if (pi && pi.order_item_id && pi.quantity) {
+          await client.query(
+            'UPDATE order_items SET paid_quantity = GREATEST(0, paid_quantity - $1) WHERE id = $2',
+            [pi.quantity, pi.order_item_id]
+          );
+        }
+      }
+    }
+
     await client.query('DELETE FROM payments WHERE id = $1 AND cafe_id = $2', [paymentId, cafeId]);
     await client.query('COMMIT');
 
@@ -108,113 +188,112 @@ router.delete('/:id', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/payments/history - Full Kasa & Payment History (Wireframe Screen)
+// GET /api/payments/history - Table bills grouped by session, paginated, with cached metrics
 router.get('/history', authenticate, async (req, res) => {
   try {
-    const { date, page = 1, limit = 10, search = '', payment_type } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { page = 1, limit = 8, search = '', payment_type } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 8));
+    const offset = (pageNum - 1) * limitNum;
     const cafeId = req.user.cafe_id;
-    const filterDate = date || new Date().toISOString().split('T')[0];
+    // No date filter → show all history; if a date string is provided, filter to that day.
+    const date = req.query.date ? String(req.query.date).slice(0, 10) : null;
 
-    let whereClause = `WHERE p.cafe_id = $1`;
+    // Build WHERE for the day + param list
     const params = [cafeId];
+    let dateClause = '';
+    if (date) {
+      params.push(date);
+      dateClause = `AND DATE(p.created_at) = $${params.length}`;
+    }
 
+    // Per-session filter conditions (HAVING) for search & payment type.
+    // Placeholder numbers must account for base params (cafeId + optional date).
+    const having = [];
+    const havingParams = [];
+    const havingPos = () => params.length + havingParams.length;
     if (search && search.trim()) {
-      params.push(`%${search.trim()}%`);
-      whereClause += ` AND (t.name ILIKE $${params.length} OR a.name ILIKE $${params.length} OR u.full_name ILIKE $${params.length} OR p.notes ILIKE $${params.length})`;
+      havingParams.push(`%${search.trim()}%`);
+      having.push(`(BOOL_OR(t.name ILIKE $${havingPos()}) OR BOOL_OR(a.name ILIKE $${havingPos()}) OR BOOL_OR(u.full_name ILIKE $${havingPos()}) OR BOOL_OR((p.notes)::text ILIKE $${havingPos()}))`);
     }
-
     if (payment_type && payment_type !== 'all') {
-      params.push(payment_type);
-      whereClause += ` AND p.payment_type = $${params.length}`;
+      havingParams.push(payment_type);
+      having.push(`BOOL_OR(p.payment_type = $${havingPos()})`);
     }
+    const havingClause = having.length > 0 ? 'HAVING ' + having.join(' AND ') : '';
 
-    // 1. Transaction list with table and session breakdown
-    const queryParams = [...params, parseInt(limit), offset];
-    const transactionsQuery = `
+    // Merge params: base (cafeId + date) come first, then having params, then limit/offset
+    const mergedParams = [...params, ...havingParams];
+
+    const txQuery = `
       SELECT
-        p.id,
-        p.created_at,
-        p.amount,
-        p.discount_amount,
-        p.discount_reason,
-        p.payment_type,
-        p.notes,
+        s.id as session_id,
+        s.start_time as session_opened_at,
         t.name as table_name,
         a.name as area_name,
-        u.full_name as cashier_name,
-        COALESCE(sess_info.total_amount, p.amount) as session_total,
-        CASE WHEN p.payment_type = 'credit_card' THEN p.amount ELSE 0 END as card_amount,
-        CASE WHEN p.payment_type = 'cash' THEN p.amount ELSE 0 END as cash_amount,
-        CASE WHEN p.payment_type = 'meal_card' THEN p.amount ELSE 0 END as meal_amount
+        MAX(p.created_at) as paid_at,
+        COALESCE(SUM(p.amount), 0) as paid_amount,
+        COALESCE(s.discount_amount, 0) + COALESCE(SUM(p.discount_amount), 0) as discount_amount,
+        COALESCE(SUM(CASE WHEN p.payment_type = 'cash' THEN p.amount ELSE 0 END), 0) as cash_amount,
+        COALESCE(SUM(CASE WHEN p.payment_type = 'credit_card' THEN p.amount ELSE 0 END), 0) as card_amount,
+        COALESCE(SUM(CASE WHEN p.payment_type = 'meal_card' THEN p.amount ELSE 0 END), 0) as meal_amount,
+        COUNT(DISTINCT p.id) as payment_count,
+        STRING_AGG(DISTINCT u.full_name, ', ') as cashier_names,
+        COALESCE(sess.total_amount, 0) as session_total
       FROM payments p
-      LEFT JOIN sessions s ON p.session_id = s.id
-      LEFT JOIN tables t ON s.table_id = t.id
+      JOIN sessions s ON p.session_id = s.id
+      JOIN tables t ON s.table_id = t.id
       LEFT JOIN areas a ON t.area_id = a.id
       LEFT JOIN users u ON p.user_id = u.id
       LEFT JOIN LATERAL (
         SELECT SUM(oi.quantity * oi.unit_price) as total_amount
         FROM orders o JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.session_id = p.session_id AND o.status != 'cancelled' AND oi.status != 'cancelled'
-      ) sess_info ON true
-      ${whereClause}
-      ORDER BY p.created_at DESC
-      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        WHERE o.session_id = s.id AND o.status != 'cancelled' AND oi.status != 'cancelled'
+      ) sess ON true
+      WHERE p.cafe_id = $1 ${dateClause}
+      GROUP BY s.id, t.name, a.name, s.discount_amount, sess.total_amount
+      ${havingClause}
+      ORDER BY MAX(p.created_at) DESC
+      LIMIT $${mergedParams.length + 1} OFFSET $${mergedParams.length + 2}
     `;
 
     const countQuery = `
-      SELECT COUNT(*) as total_count
-      FROM payments p
-      LEFT JOIN sessions s ON p.session_id = s.id
-      LEFT JOIN tables t ON s.table_id = t.id
-      LEFT JOIN areas a ON t.area_id = a.id
-      LEFT JOIN users u ON p.user_id = u.id
-      ${whereClause}
+      SELECT COUNT(*) as total_count FROM (
+        SELECT s.id
+        FROM payments p
+        JOIN sessions s ON p.session_id = s.id
+        JOIN tables t ON s.table_id = t.id
+        LEFT JOIN areas a ON t.area_id = a.id
+        LEFT JOIN users u ON p.user_id = u.id
+        WHERE p.cafe_id = $1 ${dateClause}
+        GROUP BY s.id
+        ${havingClause}
+      ) sub
     `;
 
-    // 2. Metrics Summary for Today, This Week, This Month, and Selected Date
-    const metricsQuery = `
-      SELECT
-        -- TODAY
-        COALESCE(SUM(CASE WHEN DATE(created_at) = CURRENT_DATE THEN amount ELSE 0 END), 0) as today_total,
-        COALESCE(SUM(CASE WHEN DATE(created_at) = CURRENT_DATE AND payment_type = 'credit_card' THEN amount ELSE 0 END), 0) as today_card,
-        COALESCE(SUM(CASE WHEN DATE(created_at) = CURRENT_DATE AND payment_type = 'cash' THEN amount ELSE 0 END), 0) as today_cash,
+    const metrics = await getMetrics(cafeId, date || new Date().toISOString().split('T')[0]);
 
-        -- THIS WEEK (Monday to Sunday)
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE) THEN amount ELSE 0 END), 0) as week_total,
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE) AND payment_type = 'credit_card' THEN amount ELSE 0 END), 0) as week_card,
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE) AND payment_type = 'cash' THEN amount ELSE 0 END), 0) as week_cash,
-
-        -- THIS MONTH
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE) THEN amount ELSE 0 END), 0) as month_total,
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE) AND payment_type = 'credit_card' THEN amount ELSE 0 END), 0) as month_card,
-        COALESCE(SUM(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE) AND payment_type = 'cash' THEN amount ELSE 0 END), 0) as month_cash,
-
-        -- SELECTED DATE
-        COALESCE(SUM(CASE WHEN DATE(created_at) = $2::DATE THEN amount ELSE 0 END), 0) as date_total,
-        COALESCE(SUM(CASE WHEN DATE(created_at) = $2::DATE AND payment_type = 'credit_card' THEN amount ELSE 0 END), 0) as date_card,
-        COALESCE(SUM(CASE WHEN DATE(created_at) = $2::DATE AND payment_type = 'cash' THEN amount ELSE 0 END), 0) as date_cash
-      FROM payments
-      WHERE cafe_id = $1
-    `;
-
-    const [transactionsRes, countRes, metricsRes] = await Promise.all([
-      db.query(transactionsQuery, queryParams),
-      db.query(countQuery, params),
-      db.query(metricsQuery, [cafeId, filterDate]),
+    const [transactionsRes, countRes] = await Promise.all([
+      db.query(txQuery, [...mergedParams, limitNum, offset]),
+      db.query(countQuery, mergedParams),
     ]);
 
     res.json({
       transactions: transactionsRes.rows,
       totalCount: parseInt(countRes.rows[0].total_count || '0'),
-      page: parseInt(page),
-      limit: parseInt(limit),
-      filterDate,
-      metrics: metricsRes.rows[0],
+      page: pageNum,
+      limit: limitNum,
+      filterDate: date,
+      metrics,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Helper to get the next 1-based placeholder number for the running having-params array.
+function dbiNum(arr) {
+  return arr.length;
+}
 
 module.exports = router;

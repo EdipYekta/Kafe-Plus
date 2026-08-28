@@ -8,14 +8,14 @@ import {
   Coffee, ShieldCheck, LogOut, Plus, Edit2, Trash2, X,
   Users, Store, Eye, EyeOff, Phone, MapPin, Globe, ChefHat,
   CheckCircle2, XCircle, Search, RefreshCw, Building2, UserPlus,
-  ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp
+  ToggleLeft, ToggleRight, Key, ChevronDown, ChevronUp, Package, Upload,
 } from 'lucide-react';
 import clsx from 'clsx';
 
-const ADMIN_PASSWORD = 'Yekta1346!';
+const ADMIN_PASSWORD = 'Yekta1346!'; // unused — backend validates; kept only as fallback reference
 
 const ROLE_COLORS: Record<string, string> = {
-  Admin: '#ef4444', Manager: '#f97316', Cashier: '#3b82f6',
+  Owner: '#ef4444', Admin: '#ef4444', Manager: '#f97316', Cashier: '#3b82f6',
   Waiter: '#16a34a', Kitchen: '#8b5cf6',
 };
 const AVATAR_COLORS = ['#6366f1','#f97316','#16a34a','#3b82f6','#8b5cf6','#ec4899','#f59e0b','#14b8a6'];
@@ -32,6 +32,8 @@ export default function AdminPanel() {
   const [editCafe, setEditCafe] = useState<any>(null);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editUser, setEditUser] = useState<any>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importCafe, setImportCafe] = useState<any>(null);
   const qc = useQueryClient();
 
   // Auth check
@@ -256,6 +258,7 @@ export default function AdminPanel() {
                   }
                 }}
                 onManageUsers={() => { setSelectedCafeId(cafe.id); setActiveTab('users'); setSearch(''); }}
+                onImport={() => { setImportCafe(cafe); setShowImportModal(true); }}
               />
             ))}
           </div>
@@ -328,12 +331,22 @@ export default function AdminPanel() {
           onSuccess={() => { setShowUserModal(false); qc.invalidateQueries({ queryKey: ['admin-users', selectedCafeId] }); }}
         />
       )}
+
+      {/* JSON Import Modal (SuperAdmin only) */}
+      {showImportModal && (
+        <ImportProductsModal
+          cafe={importCafe}
+          authHeaders={authHeaders}
+          onClose={() => setShowImportModal(false)}
+          onSuccess={() => { setShowImportModal(false); }}
+        />
+      )}
     </div>
   );
 }
 
 // ─── Cafe Card ───
-function CafeCard({ cafe, onEdit, onDelete, onManageUsers }: any) {
+function CafeCard({ cafe, onEdit, onDelete, onManageUsers, onImport }: any) {
   const isActive = cafe.is_active !== false;
   return (
     <div className={clsx(
@@ -383,13 +396,23 @@ function CafeCard({ cafe, onEdit, onDelete, onManageUsers }: any) {
           {isActive ? '● Aktif' : '○ Pasif'}
         </span>
         <span className="text-[10px] text-slate-500 font-medium">{cafe.user_count} kullanıcı · {cafe.table_count} masa</span>
-        <button
-          onClick={onManageUsers}
-          className="ml-auto text-[10px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-        >
-          <Users className="w-3 h-3" />
-          Kullanıcılar
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={onImport}
+            className="text-[10px] font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1"
+            title="Ürünleri JSON ile içe aktar"
+          >
+            <Package className="w-3 h-3" />
+            İçe Aktar
+          </button>
+          <button
+            onClick={onManageUsers}
+            className="text-[10px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+          >
+            <Users className="w-3 h-3" />
+            Kullanıcılar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -707,6 +730,128 @@ function UserModal({ user, cafeId, cafes, roles, authHeaders, onClose, onSuccess
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Import Products (JSON) Modal — SuperAdmin only ───
+const SAMPLE_JSON = `[
+  {
+    "category": "Soğuk Kahveler",
+    "items": [
+      { "name": "Ice Latte", "description": "", "price": 150 },
+      { "name": "Ice Mocha", "description": "", "price": 165 }
+    ]
+  }
+]`;
+
+function ImportProductsModal({ cafe, authHeaders, onClose, onSuccess }: any) {
+  const [jsonText, setJsonText] = useState('');
+  const [error, setError] = useState('');
+
+  const importMutation = useMutation({
+    mutationFn: (data: any) => api.post('/products/import-json', data, { headers: authHeaders }),
+    onSuccess: (res) => {
+      toast.success(`İçe aktarım başarılı: ${res.data.categories_created} kategori, ${res.data.products_created} ürün eklendi`);
+      onSuccess();
+    },
+    onError: (e: any) => {
+      const msg = e.response?.data?.error || 'İçe aktarım başarısız';
+      setError(msg);
+      toast.error(msg);
+    },
+  });
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setJsonText(String(ev.target?.result || ''));
+    reader.readAsText(file);
+  };
+
+  const handleImport = () => {
+    setError('');
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      setError('Geçersiz JSON formatı. Lütfen kontrol edin.');
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      setError('JSON bir dizi (array) olmalıdır: [ { category, items: [...] } ]');
+      return;
+    }
+    importMutation.mutate({ cafe_id: cafe.id, data: parsed });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-[#12131c] border border-white/10 rounded-3xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5 pb-3 border-b border-white/8">
+          <h2 className="text-base font-black text-white flex items-center gap-2">
+            <Upload className="w-4 h-4 text-sky-400" />
+            Ürün İçe Aktar — {cafe.name}
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            JSON yapısı: <code className="text-sky-300">[&#123; "category": "...", "items": [&#123; "name", "description", "price" &#125;] &#125;]</code>.
+            Aynı isimli kategori ve ürünler atlanır (tekrar eklemez).
+          </p>
+
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-slate-200 px-4 py-2.5 rounded-2xl text-xs font-bold cursor-pointer border border-white/10 transition-colors">
+              <Upload className="w-3.5 h-3.5" />
+              <span>Dosya Seç (.json)</span>
+              <input type="file" accept="application/json,.json" onChange={handleFile} className="hidden" />
+            </label>
+            <button
+              type="button"
+              onClick={() => setJsonText(SAMPLE_JSON)}
+              className="text-xs font-bold text-slate-400 hover:text-white px-3 py-2.5 rounded-2xl hover:bg-white/5 transition-colors"
+            >
+              Örnek Yapı
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1.5">JSON İçeriği</label>
+            <textarea
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              placeholder={SAMPLE_JSON}
+              rows={10}
+              className="w-full bg-[#0d0e17] border border-white/10 rounded-2xl px-4 py-3 text-xs font-mono text-emerald-300 placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-all"
+            />
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs font-semibold">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2 border-t border-white/8">
+            <button type="button" onClick={onClose} className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 rounded-2xl text-xs">
+              İptal
+            </button>
+            <button
+              type="button"
+              onClick={handleImport}
+              disabled={importMutation.isPending || !jsonText.trim()}
+              className="flex-1 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-bold py-3 rounded-2xl text-xs shadow-md disabled:opacity-50 transition-all"
+            >
+              {importMutation.isPending ? 'İçe Aktarılıyor...' : 'İçe Aktar'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
