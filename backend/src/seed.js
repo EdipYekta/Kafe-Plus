@@ -23,6 +23,19 @@ async function seed() {
       ON CONFLICT DO NOTHING
       RETURNING *
     `);
+
+    // Ensure all roles exist
+    await db.query(`
+      INSERT INTO roles (name, description) VALUES
+        ('SuperAdmin', 'Sistem / uygulama yöneticisi (tüm kafeler)'),
+        ('Owner', 'Kafe Sahibi'),
+        ('Manager', 'Kafe Yöneticisi'),
+        ('Cashier', 'Kasiyer'),
+        ('Waiter', 'Garson'),
+        ('Kitchen', 'Mutfak')
+      ON CONFLICT (name) DO NOTHING
+    `);
+    console.log('Roles ready');
     const cafeId = cafe?.id || 1;
     console.log('Cafe created:', cafeId);
 
@@ -77,7 +90,7 @@ async function seed() {
           VALUES ($1, $2, $3, $4, $5, $6, $7)
           ON CONFLICT DO NOTHING
         `, [cafeId, areaIds[aIdx], `${prefix}${i}`, [2, 4, 4, 6][Math.floor(Math.random() * 4)],
-            col * 13 + 5, row * 20 + 10, i % 5 === 0 ? 'round' : 'square']);
+          col * 13 + 5, row * 20 + 10, i % 5 === 0 ? 'round' : 'square']);
       }
     }
     console.log('Tables created');
@@ -90,14 +103,18 @@ async function seed() {
     } else {
       // Fallback small demo set
       importData = [
-        { category: 'Espresso Kahveler', items: [
-          { name: 'Espresso', description: '30 ml tek shot yoğun kahve.', price: 110 },
-          { name: 'Latte', description: 'Espresso, sıcak süt ve süt köpüğü.', price: 150 },
-        ]},
-        { category: 'Soğuk İçecekler', items: [
-          { name: 'Limonata', description: '', price: 110 },
-          { name: 'Su', description: '', price: 40 },
-        ]},
+        {
+          category: 'Espresso Kahveler', items: [
+            { name: 'Espresso', description: '30 ml tek shot yoğun kahve.', price: 110 },
+            { name: 'Latte', description: 'Espresso, sıcak süt ve süt köpüğü.', price: 150 },
+          ]
+        },
+        {
+          category: 'Soğuk İçecekler', items: [
+            { name: 'Limonata', description: '', price: 110 },
+            { name: 'Su', description: '', price: 40 },
+          ]
+        },
       ];
     }
 
