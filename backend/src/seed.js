@@ -5,26 +5,10 @@ const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 async function seed() {
-  console.log('Seeding database...');
+  console.log('Seeding database from scratch...');
 
   try {
-    // Roles already created by schema.sql. Ensure SuperAdmin exists.
-    await db.query(`
-      INSERT INTO roles (name, description) VALUES
-        ('SuperAdmin', 'Sistem / uygulama yöneticisi (tüm kafeler)')
-      ON CONFLICT (name) DO NOTHING
-    `);
-    console.log('Roles ready');
-
-    // Create demo cafe
-    const { rows: [cafe] } = await db.query(`
-      INSERT INTO cafes (name, phone, address, kitchen_enabled)
-      VALUES ('Kafe+ Demo', '0212 123 45 67', 'Bağcılar, İstanbul', true)
-      ON CONFLICT DO NOTHING
-      RETURNING *
-    `);
-
-    // Ensure all roles exist
+    // 1. Roles
     await db.query(`
       INSERT INTO roles (name, description) VALUES
         ('SuperAdmin', 'Sistem / uygulama yöneticisi (tüm kafeler)'),
@@ -35,15 +19,23 @@ async function seed() {
         ('Kitchen', 'Mutfak')
       ON CONFLICT (name) DO NOTHING
     `);
-    console.log('Roles ready');
-    const cafeId = cafe?.id || 1;
-    console.log('Cafe created:', cafeId);
+    console.log('✔ Roles created');
 
-    // Create users — "admin" keeps username but is the cafe Owner
+    // 2. Main Demo Cafe (Tek kafe, ID: 1)
+    const { rows: [cafe] } = await db.query(`
+      INSERT INTO cafes (name, phone, address)
+      VALUES ('Kafe+ Demo', '0212 123 45 67', 'Bağcılar, İstanbul')
+      RETURNING *
+    `);
+    const cafeId = cafe.id;
+    console.log(`✔ Cafe created with ID: ${cafeId}`);
+
+    // 3. Users
     const ownerHash = await bcrypt.hash('admin123', 10);
     const staffHash = await bcrypt.hash('123456', 10);
 
     const users = [
+      { full_name: 'Super Yönetici', username: 'superadmin', hash: ownerHash, role: 'SuperAdmin', color: '#dc2626', pin: '0000' },
       { full_name: 'Demo Sahibi', username: 'admin', hash: ownerHash, role: 'Owner', color: '#ef4444', pin: '1111' },
       { full_name: 'Ahmet Yönetici', username: 'manager', hash: staffHash, role: 'Manager', color: '#f97316', pin: '2222' },
       { full_name: 'Mehmet Kasiyer', username: 'kasiyer', hash: staffHash, role: 'Cashier', color: '#3b82f6', pin: '3333' },
@@ -57,28 +49,21 @@ async function seed() {
       await db.query(`
         INSERT INTO users (cafe_id, role_id, full_name, username, password_hash, avatar_color, pin_code)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (username) DO NOTHING
       `, [cafeId, role.id, u.full_name, u.username, u.hash, u.color, u.pin]);
     }
-    console.log('Users created');
+    console.log('✔ Users created');
 
-    // Create areas
+    // 4. Areas & Tables
     const areaNames = ['İç Mekan', 'Bahçe', 'Teras', 'Balkon'];
     const areaIds = [];
     for (let i = 0; i < areaNames.length; i++) {
       const { rows: [area] } = await db.query(`
         INSERT INTO areas (cafe_id, name, sort_order) VALUES ($1, $2, $3)
-        ON CONFLICT DO NOTHING RETURNING id
+        RETURNING id
       `, [cafeId, areaNames[i], i]);
-      if (area) areaIds.push(area.id);
+      areaIds.push(area.id);
     }
-    if (areaIds.length === 0) {
-      const { rows } = await db.query('SELECT id FROM areas WHERE cafe_id=$1 ORDER BY sort_order', [cafeId]);
-      areaIds.push(...rows.map(r => r.id));
-    }
-    console.log('Areas created:', areaIds);
 
-    // Create tables
     for (let aIdx = 0; aIdx < areaIds.length; aIdx++) {
       const prefix = ['A', 'B', 'T', 'K'][aIdx];
       const count = [12, 21, 8, 6][aIdx];
@@ -88,34 +73,17 @@ async function seed() {
         await db.query(`
           INSERT INTO tables (cafe_id, area_id, name, capacity, pos_x, pos_y, shape)
           VALUES ($1, $2, $3, $4, $5, $6, $7)
-          ON CONFLICT DO NOTHING
         `, [cafeId, areaIds[aIdx], `${prefix}${i}`, [2, 4, 4, 6][Math.floor(Math.random() * 4)],
           col * 13 + 5, row * 20 + 10, i % 5 === 0 ? 'round' : 'square']);
       }
     }
-    console.log('Tables created');
+    console.log('✔ Areas and Tables created');
 
-    // Load categories + products from items.json (same structure as the import endpoint)
+    // 5. Categories & Products
     const itemsPath = path.resolve(__dirname, '../../items.json');
     let importData = [];
     if (fs.existsSync(itemsPath)) {
       importData = JSON.parse(fs.readFileSync(itemsPath, 'utf8'));
-    } else {
-      // Fallback small demo set
-      importData = [
-        {
-          category: 'Espresso Kahveler', items: [
-            { name: 'Espresso', description: '30 ml tek shot yoğun kahve.', price: 110 },
-            { name: 'Latte', description: 'Espresso, sıcak süt ve süt köpüğü.', price: 150 },
-          ]
-        },
-        {
-          category: 'Soğuk İçecekler', items: [
-            { name: 'Limonata', description: '', price: 110 },
-            { name: 'Su', description: '', price: 40 },
-          ]
-        },
-      ];
     }
 
     const catIds = {};
@@ -126,12 +94,10 @@ async function seed() {
       const { rows: [cat] } = await db.query(`
         INSERT INTO categories (cafe_id, name, icon, sort_order)
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT DO NOTHING RETURNING id
+        RETURNING id
       `, [cafeId, catName, '☕', i]);
-      if (cat) catIds[catName] = cat.id;
+      catIds[catName] = cat.id;
     }
-    const { rows: existingCats } = await db.query('SELECT id, name FROM categories WHERE cafe_id=$1', [cafeId]);
-    for (const ec of existingCats) catIds[ec.name] = ec.id;
 
     let prodCount = 0;
     for (const group of importData) {
@@ -144,51 +110,20 @@ async function seed() {
         await db.query(`
           INSERT INTO products (cafe_id, category_id, name, description, price, preparation_time)
           VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT DO NOTHING
         `, [cafeId, catId, name, (item.description || '').trim() || null, parseFloat(item.price) || 0, Math.floor(Math.random() * 10) + 2]);
         prodCount++;
       }
     }
-    console.log(`Products created: ${prodCount}`);
+    console.log(`✔ Categories and ${prodCount} Products created`);
 
-    // Mark a few popular items as quick access
-    const quickNames = ['Latte', 'Espresso', 'Türk Kahvesi', 'Çay', 'Su', 'Coca-Cola'];
-    for (const qn of quickNames) {
-      await db.query(`UPDATE products SET is_quick_access=true WHERE cafe_id=$1 AND name=$2`, [cafeId, qn]);
-    }
-
-    // Expense structures
-    const structures = [
-      { title: 'Dükkan Kirası', category: 'Kira', recurrence_type: 'monthly', amount: 25000, due_day: 1 },
-      { title: 'İnternet Faturası', category: 'Fatura', recurrence_type: 'monthly', amount: 500, due_day: 15 },
-      { title: 'Elektrik Faturası', category: 'Fatura', recurrence_type: 'monthly', amount: 3000, due_day: 20 },
-      { title: 'Doğalgaz Faturası', category: 'Fatura', recurrence_type: 'monthly', amount: 1500, due_day: 25 },
-    ];
-    for (const s of structures) {
-      await db.query(`
-        INSERT INTO expense_structures (cafe_id, title, category, recurrence_type, amount, due_day)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT DO NOTHING
-      `, [cafeId, s.title, s.category, s.recurrence_type, s.amount, s.due_day]);
-    }
-    console.log('Expense structures created');
-
+    // 6. Cash Register
     await db.query(`
       INSERT INTO cash_registers (cafe_id, name, day_end_time)
       VALUES ($1, 'Ana Kasa', '03:00')
-      ON CONFLICT DO NOTHING
     `, [cafeId]);
-    console.log('Cash register created');
+    console.log('✔ Cash register created');
 
-    console.log('\nSeed completed successfully!');
-    console.log('\nDemo Credentials:');
-    console.log('  Owner:    admin / admin123 (PIN: 1111)');
-    console.log('  Manager:  manager / 123456 (PIN: 2222)');
-    console.log('  Cashier:  kasiyer / 123456 (PIN: 3333)');
-    console.log('  Waiter:   garson1 / 123456 (PIN: 4444)');
-    console.log('  Kitchen:  mutfak / 123456 (PIN: 6666)');
-    console.log('\nSuperAdmin login: /admin/login with password: Yekta1346!');
-
+    console.log('\n🚀 ALL SEED DONE CLEANLY!');
     process.exit(0);
   } catch (err) {
     console.error('Seed error:', err);
