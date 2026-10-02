@@ -6,6 +6,14 @@ const router = express.Router();
 // GET /api/reports/dashboard
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
+    const role = req.user.role_name;
+    const perms = req.user.permissions || {};
+    const isMgmt = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+    const canDashboard = (perms.can_view_dashboard !== undefined ? perms.can_view_dashboard : isMgmt) && (perms.can_view_revenue || isMgmt);
+    if (!canDashboard) {
+      return res.status(403).json({ error: 'Panel ve ciro istatistiklerini görüntüleme yetkiniz yok' });
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const [revenue, topProducts, hourly] = await Promise.all([
       db.query(`
@@ -50,6 +58,14 @@ router.get('/dashboard', authenticate, async (req, res) => {
 // GET /api/reports/range?start=&end=
 router.get('/range', authenticate, async (req, res) => {
   try {
+    const role = req.user.role_name;
+    const perms = req.user.permissions || {};
+    const isMgmt = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+    const canRange = (perms.can_view_weekly_monthly || isMgmt) && (perms.can_view_revenue || isMgmt);
+    if (!canRange) {
+      return res.status(403).json({ error: 'Geçmiş ciro raporlarını görüntüleme yetkiniz yok' });
+    }
+
     const { start, end } = req.query;
     const { rows } = await db.query(`
       SELECT DATE(p.created_at) as date,
@@ -72,6 +88,13 @@ router.get('/range', authenticate, async (req, res) => {
 // POST /api/reports/end-of-day - Perform End of Day / Z-Raporu Closure
 router.post('/end-of-day', authenticate, async (req, res) => {
   try {
+    const role = req.user.role_name;
+    const perms = req.user.permissions || {};
+    const isMgmt = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+    if (!isMgmt && !perms.can_print_z_report) {
+      return res.status(403).json({ error: 'Z-Raporu alma yetkiniz yok' });
+    }
+
     const cafeId = req.user.cafe_id;
     const { notes } = req.body;
 

@@ -15,11 +15,19 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const routeByRole = (role: string) => {
+  const routeByUser = (u: any) => {
+    const role = u?.role;
+    const p = u?.permissions || {};
+    const isManagement = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+    const canDashboard = (p.can_view_dashboard !== undefined ? p.can_view_dashboard : isManagement) && (p.can_view_revenue || isManagement);
+
     if (role === 'Kitchen') router.push('/kitchen');
     else if (role === 'Waiter') router.push('/waiter');
     else if (role === 'Cashier') router.push('/cashier');
-    else router.push('/dashboard');
+    else if (canDashboard) router.push('/dashboard');
+    else if (p.can_take_payment) router.push('/cashier');
+    else if (p.can_view_kitchen) router.push('/kitchen');
+    else router.push('/waiter');
   };
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
@@ -38,7 +46,7 @@ export default function LoginPage() {
 
       login(res.data.token, res.data.user);
       toast.success(`Hos geldiniz, ${res.data.user.full_name}!`);
-      routeByRole(res.data.user.role);
+      routeByUser(res.data.user);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Kullanıcı adı veya sifre hatalı');
     } finally {

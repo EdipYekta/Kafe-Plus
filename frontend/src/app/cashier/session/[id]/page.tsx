@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -37,9 +37,23 @@ export default function CashierSessionPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const sessionId = params.id as string;
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
 
   const canPay = user?.permissions?.can_take_payment || user?.role === 'Owner' || user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin';
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
+    }
+    if (user && !canPay) {
+      if (user?.permissions?.can_view_kitchen || user.role === 'Kitchen') {
+        router.replace('/kitchen');
+      } else {
+        router.replace('/waiter');
+      }
+    }
+  }, [user, isAuthenticated, canPay, router]);
 
   const [paymentType, setPaymentType] = useState('cash');
   const [amount, setAmount] = useState('');
@@ -56,17 +70,24 @@ export default function CashierSessionPage() {
     queryKey: ['session', sessionId],
     queryFn: () => api.get(`/sessions/${sessionId}`).then((r) => r.data),
     refetchInterval: 5000,
+    enabled: Boolean(canPay),
   });
   const { data: orders = [] } = useQuery({
     queryKey: ['session-orders', sessionId],
     queryFn: () => api.get('/orders', { params: { session_id: sessionId } }).then((r) => r.data),
     refetchInterval: 5000,
+    enabled: Boolean(canPay),
   });
   const { data: payments = [] } = useQuery({
     queryKey: ['session-payments', sessionId],
     queryFn: () => api.get(`/payments/session/${sessionId}`).then((r) => r.data),
     refetchInterval: 5000,
+    enabled: Boolean(canPay),
   });
+
+  if (!isAuthenticated || !canPay) {
+    return null;
+  }
 
   const totalAmount = Number(session?.total_amount || 0);
   const paidAmount = Number(session?.paid_amount || payments.reduce((s: number, p: any) => s + Number(p.amount), 0));

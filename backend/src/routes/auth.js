@@ -10,44 +10,49 @@ const DEFAULT_PERMISSIONS = {
     can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
     can_view_products: true, can_view_kitchen: true, can_view_staff: true,
     can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
-    can_edit_table_items: true,
+    can_edit_table_items: true, can_view_dashboard: true,
   },
   Admin: {
     can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
     can_view_products: true, can_view_kitchen: true, can_view_staff: true,
     can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
-    can_edit_table_items: true,
+    can_edit_table_items: true, can_view_dashboard: true,
   },
   Manager: {
     can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
     can_view_products: true, can_view_kitchen: true, can_view_staff: true,
     can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
-    can_edit_table_items: true,
+    can_edit_table_items: true, can_view_dashboard: true,
   },
   Cashier: {
-    can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
+    can_take_payment: true, can_view_revenue: false, can_view_history: 'today_only',
     can_view_products: false, can_view_kitchen: false, can_view_staff: false,
     can_manage_expenses: false, can_print_z_report: true, can_view_weekly_monthly: false,
-    can_edit_table_items: false,
+    can_edit_table_items: false, can_view_dashboard: false,
   },
   Waiter: {
     can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only',
     can_view_products: false, can_view_kitchen: false, can_view_staff: false,
     can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false,
-    can_edit_table_items: false,
+    can_edit_table_items: false, can_view_dashboard: false,
   },
   Kitchen: {
     can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only',
     can_view_products: false, can_view_kitchen: true, can_view_staff: false,
     can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false,
-    can_edit_table_items: false,
+    can_edit_table_items: false, can_view_dashboard: false,
   },
 };
 
 function resolvePermissions(roleName, userPerms) {
   const defaults = DEFAULT_PERMISSIONS[roleName] || DEFAULT_PERMISSIONS.Waiter;
-  if (!userPerms || Object.keys(userPerms).length === 0) return defaults;
-  return { ...defaults, ...userPerms };
+  if (!userPerms || Object.keys(userPerms).length === 0) return { ...defaults };
+  const merged = { ...defaults, ...userPerms };
+  if (merged.can_view_dashboard === undefined) {
+    const isMgmt = roleName === 'Owner' || roleName === 'Admin' || roleName === 'Manager' || roleName === 'SuperAdmin';
+    merged.can_view_dashboard = Boolean(isMgmt && merged.can_view_revenue);
+  }
+  return merged;
 }
 
 // POST /api/auth/login
@@ -186,6 +191,7 @@ router.post('/admin-login', async (req, res) => {
           can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
           can_view_products: true, can_view_kitchen: true, can_view_staff: true,
           can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+          can_edit_table_items: true, can_view_dashboard: true,
         }
       }
     });
@@ -205,6 +211,7 @@ router.get('/me', authenticate, async (req, res) => {
           can_take_payment: true, can_view_revenue: true, can_view_history: 'all',
           can_view_products: true, can_view_kitchen: true, can_view_staff: true,
           can_manage_expenses: true, can_print_z_report: true, can_view_weekly_monthly: true,
+          can_edit_table_items: true, can_view_dashboard: true,
         }
       });
     }

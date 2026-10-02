@@ -34,6 +34,7 @@ const DEFAULT_PERMISSIONS: UserPermissions = {
   can_print_z_report: false,
   can_view_weekly_monthly: false,
   can_edit_table_items: false,
+  can_view_dashboard: false,
 };
 
 export default function StaffPage() {
@@ -211,6 +212,11 @@ export function StaffContent() {
                             Ödeme Yok
                           </span>
                         )}
+                        {perms.can_view_dashboard && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                            Panel
+                          </span>
+                        )}
                         {perms.can_view_revenue && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/20">
                             Ciro
@@ -307,7 +313,12 @@ function StaffModal({
   // Initial permissions from user or default
   const [permissions, setPermissions] = useState<UserPermissions>(() => {
     if (user?.permissions && Object.keys(user.permissions).length > 0) {
-      return { ...DEFAULT_PERMISSIONS, ...user.permissions };
+      const perms = { ...DEFAULT_PERMISSIONS, ...user.permissions };
+      if (perms.can_view_dashboard === undefined) {
+        const isMgmt = user?.role === 'Manager' || user?.role === 'Admin' || user?.role === 'Owner' || user?.role === 'SuperAdmin';
+        perms.can_view_dashboard = Boolean(isMgmt && perms.can_view_revenue);
+      }
+      return perms;
     }
     return DEFAULT_PERMISSIONS;
   });
@@ -331,12 +342,13 @@ function StaffModal({
           can_print_z_report: true,
           can_view_weekly_monthly: true,
           can_edit_table_items: true,
+          can_view_dashboard: true,
         });
       } else if (selectedRole.name === 'Cashier') {
         setPermissions({
           can_take_payment: true,
-          can_view_revenue: true,
-          can_view_history: 'all',
+          can_view_revenue: false,
+          can_view_history: 'today_only',
           can_view_products: false,
           can_view_kitchen: false,
           can_view_staff: false,
@@ -344,6 +356,7 @@ function StaffModal({
           can_print_z_report: true,
           can_view_weekly_monthly: false,
           can_edit_table_items: false,
+          can_view_dashboard: false,
         });
       } else if (selectedRole.name === 'Waiter') {
         setPermissions({
@@ -357,6 +370,7 @@ function StaffModal({
           can_print_z_report: false,
           can_view_weekly_monthly: false,
           can_edit_table_items: false,
+          can_view_dashboard: false,
         });
       } else if (selectedRole.name === 'Kitchen') {
         setPermissions({
@@ -370,6 +384,7 @@ function StaffModal({
           can_print_z_report: false,
           can_view_weekly_monthly: false,
           can_edit_table_items: false,
+          can_view_dashboard: false,
         });
       }
     }
@@ -549,6 +564,20 @@ function StaffModal({
                   <div>
                     <p className="text-xs font-bold text-white leading-tight">Ödeme Alabilir</p>
                     <p className="text-[10px] text-slate-400 leading-tight mt-0.5">Masadan nakit/kart tahsilat</p>
+                  </div>
+                </label>
+
+                {/* Panel / Dashboard Görme */}
+                <label className={clsx('flex items-start gap-2 p-2 rounded-xl border cursor-pointer transition-all', permissions.can_view_dashboard ? 'bg-orange-500/10 border-orange-500/30' : 'bg-white/5 border-white/5')}>
+                  <input
+                    type="checkbox"
+                    checked={permissions.can_view_dashboard}
+                    onChange={() => togglePerm('can_view_dashboard')}
+                    className="mt-0.5 rounded text-orange-500 focus:ring-0"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-white leading-tight">Panel &amp; Özet Ekranı</p>
+                    <p className="text-[10px] text-slate-400 leading-tight mt-0.5">Genel ciro ve grafik paneli</p>
                   </div>
                 </label>
 

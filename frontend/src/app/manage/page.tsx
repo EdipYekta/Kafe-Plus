@@ -20,7 +20,7 @@ export default function ManageHubPage() {
     openCategories: () => void;
   } | null>(null);
 
-  const perms: UserPermissions = user?.permissions || { can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only', can_view_products: false, can_view_kitchen: false, can_view_staff: false, can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false, can_edit_table_items: false };
+  const perms: UserPermissions = user?.permissions || { can_take_payment: false, can_view_revenue: false, can_view_history: 'today_only', can_view_products: false, can_view_kitchen: false, can_view_staff: false, can_manage_expenses: false, can_print_z_report: false, can_view_weekly_monthly: false, can_edit_table_items: false, can_view_dashboard: false };
   const isAdmin = user?.role === 'Owner' || user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin';
 
   const tabs: { key: Tab; label: string; icon: any; show: boolean }[] = [

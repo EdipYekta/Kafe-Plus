@@ -1,22 +1,55 @@
 'use client';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import MainLayout from '@/components/layout/MainLayout';
+import { useAuthStore } from '@/store/authStore';
 import { TrendingUp, Coffee, ShoppingCart, BarChart2, ArrowRight, MapPin, Users, Receipt } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import Link from 'next/link';
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { user, isAuthenticated } = useAuthStore();
+
+  const p = user?.permissions || ({} as any);
+  const role = user?.role;
+  const isManagement = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+  const canDashboard = (p.can_view_dashboard !== undefined ? p.can_view_dashboard : isManagement) && (p.can_view_revenue || isManagement);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
+    }
+    if (user && !canDashboard) {
+      if (p.can_take_payment || role === 'Cashier') {
+        router.replace('/cashier');
+      } else if (p.can_view_kitchen || role === 'Kitchen') {
+        router.replace('/kitchen');
+      } else {
+        router.replace('/waiter');
+      }
+    }
+  }, [isAuthenticated, user, canDashboard, router, role, p]);
+
   const { data: dashboard } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => api.get('/reports/dashboard').then((r) => r.data),
     refetchInterval: 30000,
+    enabled: Boolean(canDashboard),
   });
 
   const { data: tables = [] } = useQuery({
     queryKey: ['tables'],
     queryFn: () => api.get('/tables').then((r) => r.data),
+    enabled: Boolean(canDashboard),
   });
+
+  if (!isAuthenticated || !canDashboard) {
+    return null;
+  }
 
   const todayRevenue = Number(dashboard?.today?.today_revenue || 0);
   const todaySessions = Number(dashboard?.today?.today_sessions || 0);

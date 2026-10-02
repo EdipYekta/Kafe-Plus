@@ -191,13 +191,28 @@ router.delete('/:id', authenticate, async (req, res) => {
 // GET /api/payments/history - Table bills grouped by session, paginated, with cached metrics
 router.get('/history', authenticate, async (req, res) => {
   try {
+    const role = req.user.role_name;
+    const perms = req.user.permissions || {};
+    const isMgmt = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+    const canSeeWeeklyMonthly = isMgmt || !!perms.can_view_weekly_monthly;
+    const canViewRevenue = isMgmt || !!perms.can_view_revenue;
+
+    if (!isMgmt && perms.can_view_history === false) {
+      return res.status(403).json({ error: 'İşlem geçmişini görüntüleme yetkiniz yok' });
+    }
+
     const { page = 1, limit = 8, search = '', payment_type } = req.query;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 8));
     const offset = (pageNum - 1) * limitNum;
     const cafeId = req.user.cafe_id;
-    // No date filter → show all history; if a date string is provided, filter to that day.
-    const date = req.query.date ? String(req.query.date).slice(0, 10) : null;
+    const today = new Date().toISOString().split('T')[0];
+
+    // If user cannot see weekly/monthly or history is restricted to today_only, force date to today
+    let date = req.query.date ? String(req.query.date).slice(0, 10) : null;
+    if (!canSeeWeeklyMonthly || perms.can_view_history === 'today_only') {
+      date = today;
+    }
 
     // Build WHERE for the day + param list
     const params = [cafeId];
@@ -271,7 +286,21 @@ router.get('/history', authenticate, async (req, res) => {
       ) sub
     `;
 
-    const metrics = await getMetrics(cafeId, date || new Date().toISOString().split('T')[0]);
+    let metrics = {};
+    if (canViewRevenue) {
+      const fullMetrics = await getMetrics(cafeId, date || today);
+      if (!canSeeWeeklyMonthly) {
+        metrics = {
+          today_total: fullMetrics.today_total,
+          today_cash: fullMetrics.today_cash,
+          today_card: fullMetrics.today_card,
+          today_meal: fullMetrics.today_meal,
+          today_discount: fullMetrics.today_discount,
+        };
+      } else {
+        metrics = fullMetrics;
+      }
+    }
 
     const [transactionsRes, countRes] = await Promise.all([
       db.query(txQuery, [...mergedParams, limitNum, offset]),

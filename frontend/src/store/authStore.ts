@@ -12,6 +12,7 @@ export interface UserPermissions {
   can_print_z_report: boolean;
   can_view_weekly_monthly: boolean;
   can_edit_table_items: boolean;
+  can_view_dashboard: boolean;
 }
 
 export interface User {
@@ -45,6 +46,7 @@ const DEFAULT_PERMISSIONS: UserPermissions = {
   can_print_z_report: false,
   can_view_weekly_monthly: false,
   can_edit_table_items: false,
+  can_view_dashboard: false,
 };
 
 export const useAuthStore = create<AuthState>()(

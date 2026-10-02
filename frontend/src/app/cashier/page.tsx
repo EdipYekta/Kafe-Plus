@@ -36,20 +36,46 @@ function CashierContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
 
-  // Redirect Waiter role away from financial hub
+  const perms = user?.permissions || ({} as any);
+  const isAdmin = user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin' || user?.role === 'Owner';
+  const canSeeWeeklyMonthly = isAdmin || Boolean(perms.can_view_weekly_monthly);
+  const canViewRevenue = isAdmin || Boolean(perms.can_view_revenue);
+  const canPrintZ = isAdmin || Boolean(perms.can_print_z_report);
+  const canManageExpenses = isAdmin || Boolean(perms.can_manage_expenses);
+  const canSeeHistory = isAdmin || perms.can_view_history !== false;
+  const canTakePayment = isAdmin || Boolean(perms.can_take_payment);
+
+  const canAccessCashier = canTakePayment || canViewRevenue || canManageExpenses;
+
+  // Redirect users who do not have any cashier/financial rights
   useEffect(() => {
-    if (user && user.role === 'Waiter') {
-      router.replace('/waiter');
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
     }
-  }, [user, router]);
+    if (user && !canAccessCashier) {
+      if (perms.can_view_kitchen || user.role === 'Kitchen') {
+        router.replace('/kitchen');
+      } else {
+        router.replace('/waiter');
+      }
+    }
+  }, [user, isAuthenticated, canAccessCashier, router, perms]);
 
   // Tab State: 'kasa' | 'gecmis' | 'ciro' | 'giderler'
   const paramTab = searchParams.get('tab');
-  const initialTab = (paramTab && ['kasa', 'gecmis', 'ciro', 'giderler'].includes(paramTab))
+  const allowedTabs: ('kasa' | 'gecmis' | 'ciro' | 'giderler')[] = [];
+  if (canTakePayment) allowedTabs.push('kasa');
+  if (canSeeHistory) allowedTabs.push('gecmis');
+  if (canSeeWeeklyMonthly && canViewRevenue) allowedTabs.push('ciro');
+  if (canManageExpenses) allowedTabs.push('giderler');
+
+  const defaultTab = allowedTabs[0] || 'kasa';
+  const initialTab = (paramTab && allowedTabs.includes(paramTab as any))
     ? (paramTab as 'kasa' | 'gecmis' | 'ciro' | 'giderler')
-    : 'kasa';
+    : defaultTab;
 
   const [activeTab, setActiveTab] = useState<'kasa' | 'gecmis' | 'ciro' | 'giderler'>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,6 +104,7 @@ function CashierContent() {
     queryKey: ['tables'],
     queryFn: () => api.get('/tables').then((r) => r.data),
     refetchInterval: 10000,
+    enabled: Boolean(canAccessCashier && canTakePayment),
   });
 
   // 2. Payment History Query (Geçmiş) — grouped per session/bill, paginated
@@ -94,6 +121,7 @@ function CashierContent() {
         },
       }).then((r) => r.data),
     refetchInterval: 15000,
+    enabled: Boolean(canAccessCashier && canSeeHistory),
   });
 
   // 3. Reports Range Query (Ciro Raporları)
@@ -103,23 +131,27 @@ function CashierContent() {
   const { data: rangeData = [] } = useQuery({
     queryKey: ['reports-range', reportStart, reportEnd],
     queryFn: () => api.get('/reports/range', { params: { start: reportStart, end: reportEnd } }).then((r) => r.data),
+    enabled: Boolean(canAccessCashier && canSeeWeeklyMonthly && canViewRevenue),
   });
 
   const { data: dashboardData } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => api.get('/reports/dashboard').then((r) => r.data),
     refetchInterval: 30000,
+    enabled: Boolean(canAccessCashier && canViewRevenue),
   });
 
   // 4. Expenses Queries
   const { data: expenses = [] } = useQuery({
     queryKey: ['expenses'],
     queryFn: () => api.get('/expenses').then((r) => r.data),
+    enabled: Boolean(canAccessCashier && canManageExpenses),
   });
 
   const { data: structures = [] } = useQuery({
     queryKey: ['expense-structures'],
     queryFn: () => api.get('/expenses/structures').then((r) => r.data),
+    enabled: Boolean(canAccessCashier && canManageExpenses),
   });
 
   // ═══════════════════════════════════════════════
@@ -200,21 +232,9 @@ function CashierContent() {
 
   const netIncomeThisMonth = Number(metrics.month_total || 0) - totalThisMonthExpenses;
 
-  const perms = user?.permissions || {
-    can_take_payment: true,
-    can_view_revenue: true,
-    can_view_history: 'all',
-    can_view_products: true,
-    can_view_kitchen: true,
-    can_view_staff: true,
-    can_manage_expenses: true,
-    can_print_z_report: true,
-    can_view_weekly_monthly: true,
-  };
-  const isAdmin = user?.role === 'Admin' || user?.role === 'Manager' || user?.role === 'SuperAdmin';
-  const canSeeWeeklyMonthly = isAdmin || perms.can_view_weekly_monthly;
-  const canPrintZ = isAdmin || perms.can_print_z_report;
-  const canManageExpenses = isAdmin || perms.can_manage_expenses;
+  if (!isAuthenticated || !canAccessCashier) {
+    return null;
+  }
 
   return (
     <MainLayout>
@@ -258,8 +278,8 @@ function CashierContent() {
           <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 sm:pb-0 pt-1">
             {[
               { id: 'kasa', label: 'Açık Masalar & Kasa', count: occupiedTables.length, icon: CreditCard, show: true },
-              { id: 'gecmis', label: 'Ödeme & İşlem Geçmişi', count: totalHistoryCount, icon: Receipt, show: true },
-              { id: 'ciro', label: 'Ciro & Satış Raporları', icon: TrendingUp, show: canSeeWeeklyMonthly },
+              { id: 'gecmis', label: 'Ödeme & İşlem Geçmişi', count: totalHistoryCount, icon: Receipt, show: canSeeHistory },
+              { id: 'ciro', label: 'Ciro & Satış Raporları', icon: TrendingUp, show: canSeeWeeklyMonthly && canViewRevenue },
               { id: 'giderler', label: 'Giderler & Masraflar', count: expenses.length, icon: TrendingDown, show: canManageExpenses },
             ].filter(t => t.show).map(({ id, label, count, icon: Icon }) => (
               <button
@@ -396,23 +416,30 @@ function CashierContent() {
 
               {/* Date Filter: Tüm Zaman / specific day */}
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-panel p-1 rounded-2xl border border-theme text-xs font-bold">
-                  <button
-                    onClick={() => { setListDate(''); setHistoryPage(1); }}
-                    className={clsx(
-                      'px-3 py-1.5 rounded-xl transition-all',
-                      listDate === '' ? 'bg-card text-main shadow-xs font-black' : 'text-muted hover:text-main'
-                    )}
-                  >
-                    Tüm Zaman
-                  </button>
-                  <input
-                    type="date"
-                    value={listDate}
-                    onChange={(e) => { setListDate(e.target.value); setHistoryPage(1); }}
-                    className="bg-card border border-theme rounded-xl px-2 py-1 text-[10px] font-bold text-main cursor-pointer"
-                  />
-                </div>
+                {canSeeWeeklyMonthly && perms.can_view_history !== 'today_only' ? (
+                  <div className="flex items-center gap-1 bg-panel p-1 rounded-2xl border border-theme text-xs font-bold">
+                    <button
+                      onClick={() => { setListDate(''); setHistoryPage(1); }}
+                      className={clsx(
+                        'px-3 py-1.5 rounded-xl transition-all',
+                        listDate === '' ? 'bg-card text-main shadow-xs font-black' : 'text-muted hover:text-main'
+                      )}
+                    >
+                      Tüm Zaman
+                    </button>
+                    <input
+                      type="date"
+                      value={listDate}
+                      onChange={(e) => { setListDate(e.target.value); setHistoryPage(1); }}
+                      className="bg-card border border-theme rounded-xl px-2 py-1 text-[10px] font-bold text-main cursor-pointer"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-panel border border-theme text-xs font-bold text-muted">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Sadece Bugün</span>
+                  </div>
+                )}
               </div>
 
               {/* Payment Type Filters */}
@@ -580,60 +607,66 @@ function CashierContent() {
 
               {/* Right Column: 4 Summary Groups */}
               <div className="col-span-12 lg:col-span-5 space-y-3.5">
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Bu Hafta */}
-                  <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
-                    <h3 className="text-xs font-black text-main uppercase tracking-wide">Bu Hafta</h3>
-                    <SummaryFields
-                      total={metrics.week_total}
-                      card={metrics.week_card}
-                      cash={metrics.week_cash}
-                    />
-                  </div>
+                {canViewRevenue && (
+                  <div className={clsx('grid gap-3', canSeeWeeklyMonthly ? 'grid-cols-2' : 'grid-cols-1')}>
+                    {canSeeWeeklyMonthly && (
+                      <>
+                        {/* Bu Hafta */}
+                        <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
+                          <h3 className="text-xs font-black text-main uppercase tracking-wide">Bu Hafta</h3>
+                          <SummaryFields
+                            total={metrics.week_total}
+                            card={metrics.week_card}
+                            cash={metrics.week_cash}
+                          />
+                        </div>
 
-                  {/* Seçilen Tarih */}
-                  <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-black text-main uppercase tracking-wide">Tarih</h3>
-                      <input
-                        type="date"
-                        value={selectedDate}
-                        onChange={(e) => { setSelectedDate(e.target.value); setHistoryPage(1); }}
-                        className="bg-panel border border-theme rounded-xl px-2 py-0.5 text-[10px] font-bold text-main cursor-pointer"
+                        {/* Seçilen Tarih */}
+                        <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-black text-main uppercase tracking-wide">Tarih</h3>
+                            <input
+                              type="date"
+                              value={selectedDate}
+                              onChange={(e) => { setSelectedDate(e.target.value); setHistoryPage(1); }}
+                              className="bg-panel border border-theme rounded-xl px-2 py-0.5 text-[10px] font-bold text-main cursor-pointer"
+                            />
+                          </div>
+                          <SummaryFields
+                            total={metrics.date_total}
+                            card={metrics.date_card}
+                            cash={metrics.date_cash}
+                          />
+                        </div>
+
+                        {/* Bu Ay */}
+                        <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
+                          <h3 className="text-xs font-black text-main uppercase tracking-wide">Bu Ay</h3>
+                          <SummaryFields
+                            total={metrics.month_total}
+                            card={metrics.month_card}
+                            cash={metrics.month_cash}
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {/* Bugün */}
+                    <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-black text-main uppercase tracking-wide">Bugün</h3>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                          Canlı
+                        </span>
+                      </div>
+                      <SummaryFields
+                        total={metrics.today_total}
+                        card={metrics.today_card}
+                        cash={metrics.today_cash}
                       />
                     </div>
-                    <SummaryFields
-                      total={metrics.date_total}
-                      card={metrics.date_card}
-                      cash={metrics.date_cash}
-                    />
                   </div>
-
-                  {/* Bu Ay */}
-                  <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
-                    <h3 className="text-xs font-black text-main uppercase tracking-wide">Bu Ay</h3>
-                    <SummaryFields
-                      total={metrics.month_total}
-                      card={metrics.month_card}
-                      cash={metrics.month_cash}
-                    />
-                  </div>
-
-                  {/* Bugün */}
-                  <div className="bg-card rounded-3xl p-4 border border-theme shadow-theme space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-black text-main uppercase tracking-wide">Bugün</h3>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                        Canlı
-                      </span>
-                    </div>
-                    <SummaryFields
-                      total={metrics.today_total}
-                      card={metrics.today_card}
-                      cash={metrics.today_cash}
-                    />
-                  </div>
-                </div>
+                )}
 
                 {/* Big Action Box */}
                 <div className="bg-card rounded-3xl p-5 border border-theme shadow-theme space-y-3">

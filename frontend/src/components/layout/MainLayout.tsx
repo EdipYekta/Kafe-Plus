@@ -13,16 +13,17 @@ function useNavItems() {
   const { user } = useAuthStore();
   if (!user) return [];
 
-  const p = user.permissions || {};
+  const p = user.permissions || ({} as any);
   const role = user.role;
-  const isAdmin = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+  const isManagement = role === 'SuperAdmin' || role === 'Owner' || role === 'Admin' || role === 'Manager';
+  const canDashboard = (p.can_view_dashboard !== undefined ? p.can_view_dashboard : isManagement) && (p.can_view_revenue || isManagement);
 
   return [
     { icon: Coffee, label: 'Masalar', href: '/waiter', show: true },
-    { icon: CreditCard, label: 'Kasa', href: '/cashier', show: p.can_take_payment || p.can_view_revenue || isAdmin },
-    { icon: ChefHat, label: 'Mutfak', href: '/kitchen', show: p.can_view_kitchen || isAdmin },
-    { icon: LayoutGrid, label: 'Panel', href: '/dashboard', show: p.can_view_revenue || isAdmin },
-    { icon: Settings, label: 'Yönetim', href: '/manage', show: isAdmin },
+    { icon: CreditCard, label: 'Kasa', href: '/cashier', show: p.can_take_payment || p.can_view_revenue || isManagement },
+    { icon: ChefHat, label: 'Mutfak', href: '/kitchen', show: p.can_view_kitchen || isManagement },
+    { icon: LayoutGrid, label: 'Panel', href: '/dashboard', show: canDashboard },
+    { icon: Settings, label: 'Yönetim', href: '/manage', show: isManagement },
   ].filter(item => item.show);
 }
 
